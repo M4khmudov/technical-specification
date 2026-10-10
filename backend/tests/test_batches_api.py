@@ -1,41 +1,6 @@
 """HTTP-слой партий: вход, понятные ошибки, сквозной сценарий поступления."""
 
 from datetime import date
-from uuid import uuid4
-
-import pytest
-
-from app.core.security import hash_password
-from app.main import app
-from app.models import Material, Supplier, User
-from app.models.enums import Role
-from app.services.rates import get_rates_provider
-from tests.fakes import FakeRates
-
-
-@pytest.fixture
-async def api(client, session_factory):
-    """Клиент с залогиненным пользователем и данными, закоммиченными по-настоящему."""
-    suffix = uuid4().hex[:8]
-    async with session_factory() as s:
-        user = User(
-            login=f"api-{suffix}",
-            full_name="Сидоров Пётр",
-            password_hash=hash_password("secret"),
-            role=Role.STOREKEEPER,
-        )
-        material = Material(code=f"API-{suffix}", name="Воск пчелиный", unit="кг")
-        supplier = Supplier(name=f"Пасека {suffix}")
-        s.add_all([user, material, supplier])
-        await s.commit()
-
-    app.dependency_overrides[get_rates_provider] = lambda: FakeRates()
-    response = await client.post(
-        "/api/auth/login", json={"login": user.login, "password": "secret"}
-    )
-    client.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
-    yield client, material, supplier
-    app.dependency_overrides.clear()
 
 
 async def test_requires_login(client):
