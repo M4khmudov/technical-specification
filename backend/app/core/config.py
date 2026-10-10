@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     openai_model_fallback: str = "gpt-4.1-mini"
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
 
-    jwt_secret: SecretStr = SecretStr("change-me")
+    jwt_secret: SecretStr = SecretStr("change-me-to-a-long-random-string-of-32-plus-chars")
 
 
 @lru_cache

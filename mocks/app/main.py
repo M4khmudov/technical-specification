@@ -1,11 +1,14 @@
 """Мок-сервисы внешних систем: курсы валют и сервис маркировки.
 
-Логика эндпоинтов добавляется в блоках 3 (курсы) и 6 (маркировка).
+Логика маркировки добавляется в блоке 6.
 """
 
 from fastapi import FastAPI
 
+from app.rates import router as rates_router
+
 app = FastAPI(title="External services mock")
+app.include_router(rates_router)
 
 
 @app.get("/health")

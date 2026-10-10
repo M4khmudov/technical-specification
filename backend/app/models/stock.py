@@ -65,6 +65,8 @@ class Batch(Base):
     price: Mapped[UnitPrice]  # цена за единицу в валюте поставки
     currency: Mapped[Currency] = mapped_column(str_enum(Currency, "currency"))
     exchange_rate: Mapped[Rate]  # курс к рублю на дату поступления (для RUB = 1)
+    # Дата опубликованного курса: для выходного — последний предыдущий рабочий день
+    rate_date: Mapped[date] = mapped_column(Date)
     unit_cost_rub: Mapped[UnitPrice]  # себестоимость единицы в рублях
     status: Mapped[BatchStatus] = mapped_column(
         str_enum(BatchStatus, "batch_status"), default=BatchStatus.PENDING

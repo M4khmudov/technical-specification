@@ -68,6 +68,7 @@ async def make_batch(
         price=Decimal(price),
         currency=Currency.RUB,
         exchange_rate=Decimal("1"),
+        rate_date=received_on,
         unit_cost_rub=Decimal(price),
         status=status,
     )
