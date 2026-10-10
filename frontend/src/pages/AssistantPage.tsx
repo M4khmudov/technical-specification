@@ -6,6 +6,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import type { ToolRecord } from '../chatStream'
 import { streamAnswer } from '../chatStream'
+import ActionCard from '../components/ActionCard'
+import type { ActionCardData } from '../components/ActionCard'
 import { Button, ErrorBanner } from '../components/ui'
 import { fmtDateTime } from '../format'
 import { useApi } from '../useApi'
@@ -20,18 +22,27 @@ type Message = {
   model: string | null
   fallback_from: string | null
   tools: ToolRecord[]
+  actions?: ActionCardData[]
   error: string | null
   created_at: string
 }
 type ConversationDetail = Conversation & { messages: Message[] }
 
-// Человеческие названия инструментов (наполняются вместе с инструментами)
-const TOOL_LABELS: Record<string, string> = {}
+// Человеческие названия инструментов
+const TOOL_LABELS: Record<string, string> = {
+  get_material_stock: 'Остаток материала',
+  get_deficit: 'Дефицит за период',
+  list_jobs: 'Задания за период',
+  get_batch_history: 'История партии',
+  get_job_cost: 'Себестоимость задания',
+  create_job: 'Создание задания',
+}
 
 const EXAMPLES = [
   'Чего не хватит на задания этой недели?',
   'Сколько свободного соевого воска?',
   'Какая себестоимость задания №27?',
+  'Запланируй 200 свечей «Лаванда» на пятницу',
 ]
 
 function ToolChips({ tools }: { tools: ToolRecord[] }) {
@@ -59,6 +70,11 @@ function ToolChips({ tools }: { tools: ToolRecord[] }) {
 
 function AssistantMessage({ message }: { message: Message }) {
   const failed = ['stopped', 'interrupted', 'error'].includes(message.status)
+  // Актуальный статус действий приходит с сервером; во время потока — из событий инструментов
+  const cards: ActionCardData[] =
+    message.actions && message.actions.length > 0
+      ? message.actions
+      : message.tools.flatMap((t) => (t.action ? [t.action as ActionCardData] : []))
   return (
     <div className="max-w-3xl">
       <div className="rounded-lg border border-stone-200 bg-white px-4 py-3">
@@ -76,6 +92,9 @@ function AssistantMessage({ message }: { message: Message }) {
             {message.error && `: ${message.error}`}
           </div>
         )}
+        {cards.map((card) => (
+          <ActionCard key={card.id} initial={card} />
+        ))}
         <ToolChips tools={message.tools} />
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 px-1 text-xs text-stone-400">

@@ -59,6 +59,23 @@ class MessageStatus(StrEnum):
     ERROR = "error"  # модель недоступна, ответа нет
 
 
+class ActionStatus(StrEnum):
+    PENDING = "pending"  # ждёт «Подтвердить»
+    CONFIRMED = "confirmed"  # выполнено
+    REJECTED = "rejected"  # пользователь отказался
+    EXPIRED = "expired"  # не подтвердили вовремя
+    FAILED = "failed"  # при подтверждении сервис вернул ошибку
+
+
+ACTION_STATUS_LABELS = {
+    ActionStatus.PENDING: "Ждёт подтверждения",
+    ActionStatus.CONFIRMED: "Выполнено",
+    ActionStatus.REJECTED: "Отменено",
+    ActionStatus.EXPIRED: "Истекло",
+    ActionStatus.FAILED: "Не выполнено",
+}
+
+
 MESSAGE_STATUS_LABELS = {
     MessageStatus.STREAMING: "Отвечает…",
     MessageStatus.COMPLETE: "Готово",

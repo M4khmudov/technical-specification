@@ -60,7 +60,9 @@ async def test_receipt_lines_become_pending_batches_with_rub_cost(session):
     assert {(m.kind, m.quantity) for m in movements} >= {(MovementKind.RECEIPT, Decimal("25.5"))}
     log = await session.scalar(
         select(AuditLog).where(
-            AuditLog.entity_id == by_material[wax.id].id, AuditLog.action == "create"
+            AuditLog.entity_type == "batch",
+            AuditLog.entity_id == by_material[wax.id].id,
+            AuditLog.action == "create",
         )
     )
     assert log.user_full_name == "Иванова Мария Петровна"
@@ -154,7 +156,11 @@ async def test_accept_pending_batch(session):
 
     assert accepted.status == BatchStatus.ACCEPTED
     log = await session.scalar(
-        select(AuditLog).where(AuditLog.entity_id == batch.id, AuditLog.action == "accept")
+        select(AuditLog).where(
+            AuditLog.entity_type == "batch",
+            AuditLog.entity_id == batch.id,
+            AuditLog.action == "accept",
+        )
     )
     assert log.before == {"status": "pending"}
     assert log.after == {"status": "accepted"}

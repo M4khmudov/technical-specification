@@ -9,12 +9,14 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, SessionDep
 from app.assistant import chat as service
 from app.assistant import runner
+from app.assistant.tool_set import action_card
 from app.assistant.tools import ToolRegistry, default_registry
 from app.core.errors import NotFoundError
 from app.llm.registry import get_llm
 from app.llm.router import LLMRouter
 from app.models import ChatMessage, Conversation
 from app.models.enums import MESSAGE_STATUS_LABELS, MessageRole, MessageStatus
+from app.services import actions
 
 router = APIRouter(prefix="/chat", tags=["assistant"])
 
@@ -43,12 +45,23 @@ class MessageOut(BaseModel):
     model: str | None
     fallback_from: str | None
     tools: list[dict[str, Any]]
+    actions: list[dict[str, Any]] = []  # предложенные действия с актуальным статусом
     error: str | None
     created_at: datetime
 
 
 class ConversationDetailOut(ConversationOut):
     messages: list[MessageOut]
+
+
+class ActionOut(BaseModel):
+    id: int
+    kind: str
+    status: str
+    status_label: str
+    preview: dict[str, Any]
+    result: dict[str, Any] | None
+    error: str | None
 
 
 class QuestionIn(BaseModel):
@@ -59,9 +72,10 @@ def conversation_out(c: Conversation) -> ConversationOut:
     return ConversationOut(id=c.id, title=c.title, created_at=c.created_at, updated_at=c.updated_at)
 
 
-def message_out(m: ChatMessage) -> MessageOut:
+def message_out(m: ChatMessage, cards: list[dict[str, Any]] | None = None) -> MessageOut:
     status = service.effective_status(m)
     return MessageOut(
+        actions=cards or [],
         id=m.id,
         role=m.role,
         content=m.content,
@@ -92,8 +106,12 @@ async def get_conversation(
     conversation_id: int, session: SessionDep, user: CurrentUser
 ) -> ConversationDetailOut:
     c = await service.get_conversation(session, user, conversation_id)
+    cards: dict[int, list[dict[str, Any]]] = {}
+    for action in await actions.for_conversation(session, c.id):
+        cards.setdefault(action.message_id, []).append(action_card(action))
     return ConversationDetailOut(
-        **conversation_out(c).model_dump(), messages=[message_out(m) for m in c.messages]
+        **conversation_out(c).model_dump(),
+        messages=[message_out(m, cards.get(m.id)) for m in c.messages],
     )
 
 
@@ -131,3 +149,14 @@ async def stop(message_id: int, session: SessionDep, user: CurrentUser) -> dict[
     if owned is None:
         raise NotFoundError("Сообщение не найдено")
     return {"stopped": runner.request_stop(message_id)}
+
+
+@router.post("/actions/{action_id}/confirm")
+async def confirm_action(action_id: int, session: SessionDep, user: CurrentUser) -> ActionOut:
+    """«Подтвердить»: действие выполняется тем же сервисом и с теми же правами, что и кнопка."""
+    return ActionOut(**action_card(await actions.confirm(session, user, action_id)))
+
+
+@router.post("/actions/{action_id}/reject")
+async def reject_action(action_id: int, session: SessionDep, user: CurrentUser) -> ActionOut:
+    return ActionOut(**action_card(await actions.reject(session, user, action_id)))
