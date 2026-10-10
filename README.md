@@ -516,9 +516,14 @@ docker compose exec backend python -m app.evals.run              # все воп
 docker compose exec backend python -m app.evals.run --no-judge   # только машинные проверки
 docker compose exec backend python -m app.evals.run --case stock --case pii
 docker compose exec backend python -m app.evals.run --dry-run    # вопросы и эталоны, без LLM
+docker compose exec backend python -m app.evals.run --pause 50   # бесплатный Groq: ~5 тыс. токенов на вопрос при лимите 8 тыс./мин
 ```
 
 Отчёт — `backend/evals/reports/latest.md` (+ `<время>.md` и `.json`).
+
+Если модель недоступна (чаще всего — лимит запросов), вопрос повторяется один раз через
+`--retry-wait` секунд (по умолчанию 65): недоступность — не ответ модели и не должна
+засчитываться как провал. В отчёте для каждого вопроса — время и число токенов.
 
 - **13 вопросов на демо-данных** (`app/evals/cases.py`): остаток, дефицит за период,
   себестоимость задания, история партии, задания за период, действие «запланируй 200 свечей

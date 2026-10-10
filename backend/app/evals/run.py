@@ -153,6 +153,7 @@ class CaseResult:
     judge: dict[str, Any] | None = None
     error: str | None = None
     reference: str = ""
+    tokens: int | None = None
 
     @property
     def passed(self) -> bool:
@@ -213,6 +214,7 @@ async def run_case(
             )
         ).all()
         message = await session.get(ChatMessage, message_id)
+        tokens = (message.input_tokens or 0) + (message.output_tokens or 0) or None
         observation = Observation(
             answer=done.get("content") or message.content,
             status=done.get("status", message.status.value),
@@ -255,6 +257,7 @@ async def run_case(
         model=observation.model,
         tools=[t["name"] for t in observation.tools],
         seconds=round(seconds, 1),
+        tokens=tokens,
         checks=results,
         error=observation.error,
         reference=case.judge_notes(reference),
@@ -314,8 +317,8 @@ def render_markdown(results: list[CaseResult], started_at: datetime, with_judge:
         "",
         "Машинные проверки и оценка судьи независимы: «✅» — все машинные проверки вопроса прошли.",
         "",
-        "| # | Вопрос | Теги | Машинные проверки | Судья | Инструменты | Время |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| # | Вопрос | Теги | Машинные проверки | Судья | Инструменты | Время | Токены |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for i, r in enumerate(results, 1):
         ok = sum(c.passed for c in r.checks)
@@ -323,7 +326,7 @@ def render_markdown(results: list[CaseResult], started_at: datetime, with_judge:
         score = r.judge.get("score") if r.judge else None
         lines.append(
             f"| {i} | {r.title} | {', '.join(r.tags)} | {mark} {ok}/{len(r.checks)} | "
-            f"{score if score else '—'} | {', '.join(r.tools) or '—'} | {r.seconds} с |"
+            f"{score if score else '—'} | {', '.join(r.tools) or '—'} | {r.seconds} с | {r.tokens or '—'} |"
         )
     for i, r in enumerate(results, 1):
         lines += [
@@ -364,6 +367,15 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
     parser.add_argument("--no-judge", action="store_true", help="без LLM-судьи")
     parser.add_argument("--dry-run", action="store_true", help="только показать вопросы и эталоны")
     parser.add_argument("--out", type=Path, default=REPORTS_DIR)
+    parser.add_argument(
+        "--pause", type=float, default=0, help="пауза между вопросами, с (лимиты бесплатных API)"
+    )
+    parser.add_argument(
+        "--retry-wait",
+        type=float,
+        default=65,
+        help="если модель недоступна (лимит), подождать и повторить вопрос один раз",
+    )
     args = parser.parse_args(argv)
 
     cases = [c for c in CASES if not args.case or c.id in args.case]
@@ -383,13 +395,22 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
     for case in cases:
         print(f"→ {case.id}: ", end="", flush=True)
         result, judge_input = await run_case(case, llm, recorders, today)
+        if result.status == "error" and args.retry_wait > 0:
+            # Модель недоступна (чаще всего лимит запросов) — это не ответ модели, повторим
+            print(f"модель недоступна, жду {args.retry_wait:g} с… ", end="", flush=True)
+            await asyncio.sleep(args.retry_wait)
+            result, judge_input = await run_case(case, llm, recorders, today)
         if not args.no_judge:
+            if args.pause:
+                await asyncio.sleep(args.pause / 2)
             result.judge = await judge(llm, judge_input)
         score = result.judge.get("score") if result.judge else "—"
         print(
             f"{'OK' if result.passed else 'FAIL'} ({sum(c.passed for c in result.checks)}/{len(result.checks)}), судья {score}"
         )
         results.append(result)
+        if args.pause and case is not cases[-1]:
+            await asyncio.sleep(args.pause)
 
     args.out.mkdir(parents=True, exist_ok=True)
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
