@@ -14,6 +14,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from app.assistant.pii import Pseudonymizer, StreamUnmasker
@@ -142,7 +143,7 @@ async def run_turn(
             }
             state.tools.append(record)
             yield ChatEvent("tool", {**record, "status": "finished"})
-            output = json.dumps(outcome.output, ensure_ascii=False, default=str)
+            output = json.dumps(tidy_numbers(outcome.output), ensure_ascii=False, default=str)
             items.append(call)  # в истории для модели — как она его прислала (с псевдонимами)
             items.append(ToolResult(call.call_id, pii.mask(output) if pii else output))
 
@@ -165,3 +166,21 @@ def code_run(event: CodeExecuted, pii: Pseudonymizer | None) -> dict[str, Any]:
         "error": failed,
         "images": sum(1 for o in event.outputs if o.get("type") == "image"),
     }
+
+
+_DECIMAL_STRING = re.compile(r"-?\d+\.\d+")
+
+
+def tidy_numbers(value: Any) -> Any:
+    """Числа-строки для модели без хвостовых нулей: «36.000» → «36», «203.4410» → «203.441».
+
+    Значение не меняется; модели (замечено у gpt-oss) путаются в хвостовых нулях и
+    переписывают «36.000» как «36 0 0».
+    """
+    if isinstance(value, dict):
+        return {k: tidy_numbers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [tidy_numbers(v) for v in value]
+    if isinstance(value, str) and _DECIMAL_STRING.fullmatch(value):
+        return format(Decimal(value).normalize(), "f")
+    return value

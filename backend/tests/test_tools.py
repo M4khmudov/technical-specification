@@ -335,3 +335,15 @@ async def test_period_validation(session, shop):
     ctx = await context(session, shop[0])
     outcome = await call(ctx, "get_deficit", date_from="2026-10-20", date_to="2026-10-01")
     assert not outcome.ok
+
+
+def test_numbers_for_the_model_have_no_trailing_zeros():
+    from app.assistant.agent import tidy_numbers
+
+    assert tidy_numbers(
+        {"free": "36.000", "rows": [["203.4410", "0.000"]], "date": "2026-10-16"}
+    ) == {
+        "free": "36",
+        "rows": [["203.441", "0"]],
+        "date": "2026-10-16",
+    }
