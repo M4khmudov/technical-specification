@@ -44,7 +44,7 @@ from app.schemas.production import (
     ReservationOut,
 )
 from app.schemas.stock import Page
-from app.services import audit
+from app.services import audit, marking
 
 ZERO = Decimal("0")
 CANCELLABLE = (JobStatus.DRAFT, JobStatus.PLANNED)
@@ -390,7 +390,12 @@ async def complete_job(
             "actual": {str(mid): str(q) for mid, q in sorted(actual.items())},
         },
     )
+    # Отчёт в сервис маркировки — в той же транзакции (outbox): завершение не ждёт
+    # сервис, а отчёт не потеряется, даже если очередь сейчас недоступна
+    report = marking.build_report(job)
+    session.add(report)
     await session.commit()
+    await marking.enqueue(report.id)
     return await get_job(session, job_id)
 
 

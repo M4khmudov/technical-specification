@@ -24,6 +24,8 @@ TEST_DATABASE_URL = os.environ.get(
 # Приложение в тестах тоже смотрит в тестовую базу
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["JWT_SECRET"] = "test-secret-at-least-32-bytes-long-0123456789"
+# Отчёты маркировки в тестах не ставятся в очередь Redis
+os.environ["MARKING_ENQUEUE_ENABLED"] = "false"
 # Тесты не ходят в сеть: ключ LLM никогда не подставляется
 os.environ.pop("OPENAI_API_KEY", None)
 

@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     # Мок-сервисы (курсы валют, маркировка)
     rates_service_url: str = "http://localhost:8001/rates"
     marking_service_url: str = "http://localhost:8001/marking"
+    # Не ждём ответа дольше: медленный ответ сервис мог успеть обработать,
+    # повтор с тем же ключом идемпотентности не создаст дубль
+    marking_timeout_seconds: float = Field(default=5.0, gt=0)
+    marking_max_attempts: int = Field(default=8, ge=1)
+    marking_backoff_base_seconds: float = Field(default=5.0, gt=0)
+    marking_backoff_max_seconds: float = Field(default=300.0, gt=0)
+    # Ставить ли задачу в очередь arq сразу после завершения (в тестах выключено;
+    # без очереди отчёт всё равно уйдёт — его подберёт периодическая задача воркера)
+    marking_enqueue_enabled: bool = True
 
     # LLM: ключ выдаётся отдельно, в репозитории его нет
     openai_api_key: SecretStr | None = None

@@ -15,6 +15,7 @@ class Permission(StrEnum):
     JOB_MANAGE = "job.manage"  # создать, запланировать, дозарезервировать, отменить
     JOB_RUN = "job.run"  # запустить, завершить
     AUDIT_VIEW = "audit.view"  # общий журнал изменений
+    MARKING_RETRY = "marking.retry"  # повторить отправку в сервис маркировки вручную
 
 
 # Что именно запрещено — для текста ошибки
@@ -24,6 +25,7 @@ ACTION_TEXT = {
     Permission.JOB_MANAGE: "создавать, планировать и отменять задания",
     Permission.JOB_RUN: "запускать и завершать задания",
     Permission.AUDIT_VIEW: "просматривать общий журнал изменений",
+    Permission.MARKING_RETRY: "повторять отправку отчёта в сервис маркировки",
 }
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {

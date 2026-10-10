@@ -48,6 +48,31 @@ def record(
     )
 
 
+SYSTEM_ACTOR = "Система (сервис маркировки)"
+
+
+def record_system(
+    session: AsyncSession,
+    entity_type: str,
+    entity_id: int,
+    action: str,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+) -> None:
+    """Изменение, сделанное фоновым процессом, а не пользователем."""
+    session.add(
+        AuditLog(
+            user_id=None,
+            user_full_name=SYSTEM_ACTOR,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            before=before,
+            after=after,
+        )
+    )
+
+
 async def entity_history(session: AsyncSession, entity_type: str, entity_id: int) -> list[AuditLog]:
     """История одной сущности (партии, задания) — видна всем ролям."""
     rows = await session.scalars(
