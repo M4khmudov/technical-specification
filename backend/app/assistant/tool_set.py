@@ -282,9 +282,13 @@ class ExportArgs(BaseModel):
 
 async def export_data(ctx: ToolContext, args: ExportArgs) -> ToolOutcome:
     if ctx.ci is None or not ctx.ci.available:
-        return ToolOutcome(
-            {"error": "Code Interpreter недоступен"}, "Code Interpreter недоступен", ok=False
+        message = (
+            "Выгрузка файлов в Code Interpreter недоступна у текущего провайдера модели. "
+            "Возьми нужные числа из других инструментов и посчитай в коде или в ответе."
+            if ctx.ci is not None and ctx.ci.code_without_files
+            else "Code Interpreter недоступен"
         )
+        return ToolOutcome({"error": message}, "Выгрузка данных недоступна", ok=False)
     table = await exports.build(
         ctx.session, args.dataset, args.date_from, args.date_to, args.material
     )

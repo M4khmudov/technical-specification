@@ -14,6 +14,18 @@ PROVIDERS: dict[str, Callable[[Settings], LLMProvider]] = {
         s.openai_api_key.get_secret_value() if s.openai_api_key else None,
         timeout=s.llm_timeout_seconds,
     ),
+    # Groq: бесплатный тариф для проверки без ключа OpenAI. Совместим с Responses API;
+    # не поддерживает store и include; выполнение кода есть (gpt-oss), файлов контейнера нет.
+    "groq": lambda s: OpenAIProvider(
+        s.groq_api_key.get_secret_value() if s.groq_api_key else None,
+        timeout=s.llm_timeout_seconds,
+        name="groq",
+        base_url="https://api.groq.com/openai/v1",
+        key_env="GROQ_API_KEY",
+        supports_store=False,
+        supports_include=False,
+        supports_files=False,
+    ),
 }
 
 

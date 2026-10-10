@@ -118,29 +118,59 @@ def map_event(event: Any) -> Event | None:
 
 
 class OpenAIProvider:
-    name = "openai"
+    """OpenAI Responses API. Тот же класс работает с совместимыми провайдерами (Groq):
+    другой base_url и флаги того, что провайдер поддерживает."""
 
-    def __init__(self, api_key: str | None, timeout: float, client: Any = None):
-        self._api_key = api_key
+    def __init__(
+        self,
+        api_key: str | None,
+        timeout: float,
+        client: Any = None,
+        *,
+        name: str = "openai",
+        base_url: str | None = None,
+        key_env: str = "OPENAI_API_KEY",
+        supports_store: bool = True,  # параметр store=False (не хранить диалоги)
+        supports_include: bool = True,  # include=[логи Code Interpreter]
+        supports_files: bool = True,  # Files API и файлы контейнеров Code Interpreter
+        supports_code_interpreter: bool = True,
+    ):
+        self.name = name
+        self.key_env = key_env
+        self.supports_store = supports_store
+        self.supports_include = supports_include
+        self.supports_files = supports_files
+        self.supports_code_interpreter = supports_code_interpreter
         # max_retries=0: повторы и переход на запасную модель делает наш роутер
         self._client = client or (
-            openai.AsyncOpenAI(api_key=api_key, max_retries=0, timeout=timeout) if api_key else None
+            openai.AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=timeout)
+            if api_key
+            else None
         )
 
     async def stream(self, request: LLMRequest, model: str) -> AsyncIterator[Event]:
         if self._client is None:
-            raise LLMError("OPENAI_API_KEY не задан", retryable=False)
+            raise LLMError(f"{self.key_env} не задан", retryable=False)
         params: dict[str, Any] = {
             "model": model,
             "instructions": request.instructions,
             "input": to_input(request),
             "stream": True,
-            "store": False,  # не храним диалоги на стороне OpenAI
         }
+        if self.supports_store:
+            params["store"] = False  # не храним диалоги на стороне провайдера
+        if not self.supports_code_interpreter:
+            request = LLMRequest(
+                request.instructions,
+                request.items,
+                request.tools,
+                None,
+                request.max_output_tokens,
+            )
         tools = to_tools(request)
         if tools:
             params["tools"] = tools
-        if request.code_interpreter is not None:
+        if request.code_interpreter is not None and self.supports_include:
             # логи выполнения кода — чтобы показать их и понять ошибку
             params["include"] = ["code_interpreter_call.outputs"]
         if request.max_output_tokens:
@@ -169,7 +199,11 @@ class OpenAIProvider:
 
     def _require_client(self) -> Any:
         if self._client is None:
-            raise LLMError("OPENAI_API_KEY не задан", retryable=False)
+            raise LLMError(f"{self.key_env} не задан", retryable=False)
+        if not self.supports_files:
+            raise LLMError(
+                f"{self.name}: файлы Code Interpreter не поддерживаются", retryable=False
+            )
         return self._client
 
     async def upload_file(self, filename: str, data: bytes) -> str:

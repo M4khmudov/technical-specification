@@ -11,6 +11,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 UNAVAILABLE = "Ассистент сейчас недоступен: языковая модель не отвечает. Попробуйте через минуту."
 BAD_REQUEST = "Ассистент не смог обработать запрос. Попробуйте сформулировать его иначе."
-NOT_CONFIGURED = "Ассистент не настроен: не задан ключ OPENAI_API_KEY."
+NOT_CONFIGURED = "Ассистент не настроен: не задан ключ {key}."
 INTERRUPTED = "Ответ прервался из-за сбоя языковой модели. Попробуйте повторить вопрос."
 
 
@@ -95,7 +96,8 @@ class LLMRouter:
                     raise LLMInterruptedError(INTERRUPTED, exc) from exc
                 errors.append(exc)
                 if not exc.retryable:
-                    message = NOT_CONFIGURED if "OPENAI_API_KEY" in exc.message else BAD_REQUEST
+                    key = re.search(r"\b([A-Z_]+_API_KEY) не задан", exc.message)
+                    message = NOT_CONFIGURED.format(key=key.group(1)) if key else BAD_REQUEST
                     raise LLMUnavailableError(message, errors) from exc
             finally:
                 await _close(events)
@@ -109,7 +111,14 @@ class LLMRouter:
         обеим. Если запасная будет у другого провайдера, Code Interpreter у неё недоступен.
         """
         provider = self.routes[0].provider
-        return provider if hasattr(provider, "upload_file") else None  # type: ignore[return-value]
+        if not hasattr(provider, "upload_file") or not getattr(provider, "supports_files", True):
+            return None
+        return provider  # type: ignore[return-value]
+
+    @property
+    def code_interpreter(self) -> bool:
+        """Есть ли у основного провайдера выполнение кода (у Groq — без файлов)."""
+        return bool(getattr(self.routes[0].provider, "supports_code_interpreter", True))
 
     async def complete(self, request: LLMRequest) -> tuple[str, Started | None]:
         """Ответ целиком (для служебных вызовов: LLM-судья, извлечение фактов)."""

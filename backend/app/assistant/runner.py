@@ -215,7 +215,9 @@ async def generate(
 ) -> None:
     state = TurnState()
     status, error = MessageStatus.COMPLETE, None
-    ci = CodeInterpreterSession(llm.files, None)
+    ci = CodeInterpreterSession(
+        llm.files, None, code_without_files=llm.files is None and llm.code_interpreter
+    )
     files: list[ChatFile] = []
     try:
         async with SessionLocal() as session:

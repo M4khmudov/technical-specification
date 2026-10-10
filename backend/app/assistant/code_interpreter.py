@@ -111,13 +111,18 @@ class CodeInterpreterSession:
     pii: Pseudonymizer | None
     file_ids: list[str] = field(default_factory=list)
     filenames: list[str] = field(default_factory=list)
+    # выполнение кода без файлов (у провайдера нет Files API — например, Groq)
+    code_without_files: bool = False
 
     @property
     def available(self) -> bool:
+        """Можно ли класть файлы в контейнер."""
         return self.store is not None
 
     def spec(self) -> CodeInterpreterSpec | None:
-        return CodeInterpreterSpec(file_ids=tuple(self.file_ids)) if self.available else None
+        if self.available or self.code_without_files:
+            return CodeInterpreterSpec(file_ids=tuple(self.file_ids))
+        return None
 
     async def add(self, filename: str, data: bytes) -> str:
         """Положить файл в контейнер (с псевдонимами). Возвращает путь внутри контейнера."""

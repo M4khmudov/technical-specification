@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # LLM: ключ выдаётся отдельно, в репозитории его нет
     openai_api_key: SecretStr | None = None
+    # Groq — бесплатная альтернатива для проверки (LLM_PRIMARY=groq:openai/gpt-oss-120b)
+    groq_api_key: SecretStr | None = None
     # Модели в формате «провайдер:модель»; запасная используется при 429/5xx/таймауте
     llm_primary: str = "openai:gpt-4.1"
     llm_fallback: str = "openai:gpt-4.1-mini"

@@ -7,6 +7,7 @@ x-backend-env: &backend-env
   RATES_SERVICE_URL: http://mocks:8001/rates
   MARKING_SERVICE_URL: http://mocks:8001/marking
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
   LLM_PRIMARY: ${LLM_PRIMARY:-openai:gpt-4.1}
   LLM_FALLBACK: ${LLM_FALLBACK:-openai:gpt-4.1-mini}
   LLM_EVENT_TIMEOUT_SECONDS: ${LLM_EVENT_TIMEOUT_SECONDS:-30}

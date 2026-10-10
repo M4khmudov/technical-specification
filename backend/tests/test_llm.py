@@ -552,3 +552,82 @@ async def test_real_sdk_code_interpreter_events_and_files():
     assert await provider.upload_file("d.csv", b"a,b") == "file-77"
     assert await provider.list_generated_files("cntr_9") == [("cfile_1", "/mnt/data/chart.png")]
     assert await provider.download_container_file("cntr_9", "cfile_1") == b"PNG"
+
+
+# ---------------------------------------------------------------- Groq (бесплатная альтернатива)
+
+
+async def test_groq_requests_are_compatible():
+    """Groq через тот же Responses API: другой адрес, без store и include."""
+    import json as _json
+
+    from app.llm.registry import PROVIDERS
+
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = _json.loads(request.content)
+        body = _sse(
+            {
+                "type": "response.output_text.delta",
+                "item_id": "m1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "Ок",
+                "logprobs": [],
+                "sequence_number": 1,
+            },
+        )
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    settings = Settings(groq_api_key="gsk-test", llm_primary="groq:openai/gpt-oss-120b")
+    provider = PROVIDERS["groq"](settings)
+    provider._client = openai.AsyncOpenAI(
+        api_key="gsk-test",
+        base_url="https://api.groq.com/openai/v1",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    request = LLMRequest(
+        instructions="sys",
+        items=[UserMessage("посчитай")],
+        code_interpreter=CodeInterpreterSpec(),
+    )
+    events = [e async for e in provider.stream(request, "openai/gpt-oss-120b")]
+
+    assert text_of(events) == "Ок"
+    assert captured["url"].startswith("https://api.groq.com/openai/v1/responses")
+    body = captured["body"]
+    assert body["model"] == "openai/gpt-oss-120b"
+    assert "store" not in body and "include" not in body  # Groq их не поддерживает
+    assert body["tools"] == [
+        {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}}
+    ]
+
+
+def test_groq_router_has_code_but_no_files():
+    settings = Settings(
+        groq_api_key="gsk-test",
+        llm_primary="groq:openai/gpt-oss-120b",
+        llm_fallback="groq:openai/gpt-oss-20b",
+    )
+    router = build_router(settings)
+    assert [r.label for r in router.routes] == [
+        "groq:openai/gpt-oss-120b",
+        "groq:openai/gpt-oss-20b",
+    ]
+    assert router.files is None  # Files API у Groq нет
+    assert router.code_interpreter is True
+
+    from app.assistant.code_interpreter import CodeInterpreterSession
+
+    ci = CodeInterpreterSession(router.files, None, code_without_files=True)
+    assert not ci.available and ci.spec() == CodeInterpreterSpec(file_ids=())
+
+
+async def test_missing_groq_key_names_the_right_variable():
+    settings = Settings(groq_api_key=None, llm_primary="groq:openai/gpt-oss-120b", llm_fallback="")
+    with pytest.raises(LLMUnavailableError) as exc:
+        await collect(build_router(settings))
+    assert exc.value.user_message == "Ассистент не настроен: не задан ключ GROQ_API_KEY."
