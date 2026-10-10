@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.errors import ConflictError, DomainError, NotFoundError
 from app.core.format import fmt_qty
+from app.core.permissions import Permission, require
 from app.models import (
     Batch,
     BatchMovement,
@@ -181,6 +182,7 @@ async def create_job(
     session: AsyncSession, actor: User, data: JobCreateIn, *, plan: bool = False
 ) -> JobOut:
     """Создать задание (Черновик); с plan=True — сразу запланировать и зарезервировать."""
+    require(actor, Permission.JOB_MANAGE)
     recipe = await session.scalar(
         select(Recipe).options(selectinload(Recipe.items)).where(Recipe.id == data.recipe_id)
     )
@@ -223,6 +225,7 @@ async def create_job(
 
 
 async def plan_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
+    require(actor, Permission.JOB_MANAGE)
     job = await _lock_job(session, job_id)
     _require_status(job, (JobStatus.DRAFT,), "запланировать")
     job.status = JobStatus.PLANNED
@@ -242,6 +245,7 @@ async def plan_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
 
 async def reserve_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
     """Дозарезервировать дефицит (например, после приёмки новой партии)."""
+    require(actor, Permission.JOB_MANAGE)
     job = await _lock_job(session, job_id)
     _require_status(job, (JobStatus.PLANNED,), "дозарезервировать")
     before = _reservation_totals(job)
@@ -262,6 +266,7 @@ async def reserve_job(session: AsyncSession, actor: User, job_id: int) -> JobOut
 
 
 async def start_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
+    require(actor, Permission.JOB_RUN)
     job = await _lock_job(session, job_id)
     _require_status(job, (JobStatus.PLANNED,), "запустить")
     deficits = _deficits(job)
@@ -302,6 +307,7 @@ async def complete_job(
     Резерв списывается по FIFO; экономия (факт < резерва) возвращается в партии,
     перерасход (факт > резерва) досписывается из свободного остатка по FIFO.
     """
+    require(actor, Permission.JOB_RUN)
     job = await _lock_job(session, job_id)
     _require_status(job, (JobStatus.IN_PROGRESS,), "завершить")
 
@@ -410,6 +416,7 @@ def _movement(
 
 
 async def cancel_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
+    require(actor, Permission.JOB_MANAGE)
     job = await _lock_job(session, job_id)
     _require_status(job, CANCELLABLE, "отменить")
     before_status = job.status

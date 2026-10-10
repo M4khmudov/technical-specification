@@ -81,12 +81,19 @@ async def client(engine) -> AsyncIterator[AsyncClient]:
 
 
 @pytest.fixture
-async def api(client, session_factory):
+def api_role():
+    """Роль пользователя фикстуры api; модуль может переопределить этот фикстур."""
+    from app.models.enums import Role
+
+    return Role.STOREKEEPER
+
+
+@pytest.fixture
+async def api(client, session_factory, api_role):
     """Клиент с залогиненным пользователем и данными, закоммиченными по-настоящему."""
     from app.core.security import hash_password
     from app.main import app
     from app.models import Material, Supplier, User
-    from app.models.enums import Role
     from app.services.rates import get_rates_provider
     from tests.fakes import FakeRates
 
@@ -96,7 +103,7 @@ async def api(client, session_factory):
             login=f"api-{suffix}",
             full_name="Сидоров Пётр",
             password_hash=hash_password("secret"),
-            role=Role.STOREKEEPER,
+            role=api_role,
         )
         material = Material(code=f"API-{suffix}", name="Воск пчелиный", unit="кг")
         supplier = Supplier(name=f"Пасека {suffix}")

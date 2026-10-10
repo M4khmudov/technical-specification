@@ -3,8 +3,15 @@
 from datetime import date, timedelta
 from uuid import uuid4
 
+import pytest
+
 from app.models import Batch, Receipt, Recipe, RecipeItem
-from app.models.enums import BatchStatus, Currency
+from app.models.enums import BatchStatus, Currency, Role
+
+
+@pytest.fixture
+def api_role():
+    return Role.TECHNOLOGIST
 
 
 async def test_job_lifecycle_over_http(api, session_factory):

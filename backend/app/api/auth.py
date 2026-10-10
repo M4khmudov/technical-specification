@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, SessionDep, UnauthorizedError
+from app.core.permissions import ROLE_PERMISSIONS, Permission
 from app.core.security import create_access_token, verify_password
 from app.models import User
 from app.models.enums import ROLE_LABELS, Role
@@ -21,6 +22,7 @@ class UserOut(BaseModel):
     full_name: str
     role: Role
     role_label: str
+    permissions: list[Permission]  # интерфейс по ним прячет недоступные кнопки
 
 
 class TokenOut(BaseModel):
@@ -36,6 +38,7 @@ def user_out(user: User) -> UserOut:
         full_name=user.full_name,
         role=user.role,
         role_label=ROLE_LABELS[user.role],
+        permissions=sorted(ROLE_PERMISSIONS[user.role]),
     )
 
 

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.errors import ConflictError, DomainError, NotFoundError
+from app.core.permissions import Permission, require
 from app.models import (
     AuditLog,
     Batch,
@@ -72,6 +73,7 @@ async def create_receipt(
     session: AsyncSession, actor: User, data: ReceiptIn, rates: RatesProvider
 ) -> ReceiptOut:
     """Оформить поступление: каждая строка становится партией «На проверке»."""
+    require(actor, Permission.RECEIPT_CREATE)
     if data.received_on > date.today():
         raise DomainError("Дата поступления не может быть в будущем")
 
@@ -146,6 +148,7 @@ async def create_receipt(
 async def _set_status(
     session: AsyncSession, actor: User, batch_id: int, new_status: BatchStatus, reason: str | None
 ) -> BatchOut:
+    require(actor, Permission.BATCH_REVIEW)
     # FOR UPDATE: одновременные «принять» и «брак» по одной партии выполнятся по очереди
     batch = await session.scalar(select(Batch).where(Batch.id == batch_id).with_for_update())
     if batch is None:
