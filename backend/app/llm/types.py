@@ -85,11 +85,20 @@ class ToolCallRequested:
 
 @dataclass(frozen=True)
 class CodeExecuted:
-    """Code Interpreter выполнил код (детали добавляются в блоке 13)."""
+    """Code Interpreter выполнил код. outputs — логи (type=logs) и картинки (type=image)."""
 
     code: str
     container_id: str | None = None
     outputs: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class FileCited:
+    """Модель сослалась в ответе на файл, созданный в контейнере Code Interpreter."""
+
+    container_id: str
+    file_id: str
+    filename: str
 
 
 @dataclass(frozen=True)
@@ -101,4 +110,4 @@ class Completed:
     finish: Literal["stop", "tool_calls", "length"] = "stop"
 
 
-Event = Started | TextDelta | ToolCallRequested | CodeExecuted | Completed
+Event = Started | TextDelta | ToolCallRequested | CodeExecuted | FileCited | Completed

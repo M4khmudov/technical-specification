@@ -15,7 +15,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from app.llm.base import LLMProvider
+from app.llm.base import FileStore, LLMProvider
 from app.llm.errors import LLMError, LLMInterruptedError, LLMUnavailableError
 from app.llm.types import Completed, Event, LLMRequest, Started, TextDelta
 
@@ -100,6 +100,16 @@ class LLMRouter:
             finally:
                 await _close(events)
         raise LLMUnavailableError(UNAVAILABLE, errors)
+
+    @property
+    def files(self) -> "FileStore | None":
+        """Хранилище файлов для Code Interpreter — у основного провайдера.
+
+        Основная и запасная модели здесь у одного провайдера, поэтому file_id подходят
+        обеим. Если запасная будет у другого провайдера, Code Interpreter у неё недоступен.
+        """
+        provider = self.routes[0].provider
+        return provider if hasattr(provider, "upload_file") else None  # type: ignore[return-value]
 
     async def complete(self, request: LLMRequest) -> tuple[str, Started | None]:
         """Ответ целиком (для служебных вызовов: LLM-судья, извлечение фактов)."""

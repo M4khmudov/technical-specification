@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field, model_validator
 from app.assistant.tools import Tool, ToolContext, ToolOutcome
 from app.core.format import fmt_money, fmt_qty
 from app.models.enums import ACTION_STATUS_LABELS, JobStatus
-from app.services import actions, analytics, batches, production
+from app.services import actions, analytics, batches, exports, production
+from app.services.exports import Dataset
 
 MaterialQuery = Annotated[str, Field(min_length=2, max_length=100)]
 Number = Annotated[int, Field(gt=0, lt=10_000_000)]
@@ -258,6 +259,53 @@ async def get_job_cost(ctx: ToolContext, args: JobArgs) -> ToolOutcome:
     )
 
 
+# ---------------------------------------------------------------- данные для Code Interpreter
+
+
+class ExportArgs(BaseModel):
+    dataset: Dataset = Field(
+        description="consumption — списание материалов по дням и заданиям; receipts — "
+        "поступления (партии) с ценами и курсами; recipe_costs — нормы на 1 свечу и текущая "
+        "себестоимость материалов; jobs — задания и их себестоимость"
+    )
+    date_from: date | None = Field(
+        None, description="Начало периода, ГГГГ-ММ-ДД (по умолчанию — 91 день назад)"
+    )
+    date_to: date | None = Field(
+        None, description="Конец периода, ГГГГ-ММ-ДД (по умолчанию — сегодня)"
+    )
+    material: Annotated[str, Field(max_length=100)] | None = Field(
+        None, description="Только этот материал (код или название), для consumption и receipts"
+    )
+
+
+async def export_data(ctx: ToolContext, args: ExportArgs) -> ToolOutcome:
+    if ctx.ci is None or not ctx.ci.available:
+        return ToolOutcome(
+            {"error": "Code Interpreter недоступен"}, "Code Interpreter недоступен", ok=False
+        )
+    table = await exports.build(
+        ctx.session, args.dataset, args.date_from, args.date_to, args.material
+    )
+    if not table.rows:
+        return ToolOutcome(
+            {"rows": 0, "message": "За этот период данных нет — файл не создан"},
+            f"{table.name}: данных нет",
+        )
+    path = await ctx.ci.add(table.name, table.to_csv().encode("utf-8"))
+    return ToolOutcome(
+        {
+            "file": path,
+            "rows": len(table.rows),
+            "columns": table.columns,
+            "description": table.description,
+            "preview": [[str(v) for v in row] for row in table.rows[:5]],
+            "note": "Файл появится в /mnt/data в Code Interpreter. Числа в CSV — с точкой.",
+        },
+        f"{table.name}: {len(table.rows)} строк",
+    )
+
+
 # ---------------------------------------------------------------- действие: создать задание
 
 
@@ -341,6 +389,13 @@ TOOLS = [
         "завершения — оценка по резерву, после — по фактическому списанию.",
         JobArgs,
         get_job_cost,
+    ),
+    Tool(
+        "export_data",
+        "Подготовить набор данных CSV для Code Interpreter (графики, расчёты, «что если»). "
+        "Файл появится в /mnt/data. Вызывай перед расчётами по данным мастерской.",
+        ExportArgs,
+        export_data,
     ),
     Tool(
         "create_job",

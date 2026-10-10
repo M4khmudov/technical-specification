@@ -3,10 +3,13 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, ApiError } from '../api'
+import { api, ApiError, getToken } from '../api'
 import type { ToolRecord } from '../chatStream'
 import { streamAnswer } from '../chatStream'
 import ActionCard from '../components/ActionCard'
+import { downloadChatFile, isChatFileUrl } from '../chatFiles'
+import type { ChatFileData, CodeRun } from '../chatFiles'
+import { AuthImage, CodeRuns, FileChip, GeneratedFiles } from '../components/ChatFiles'
 import type { ActionCardData } from '../components/ActionCard'
 import { Button, ErrorBanner } from '../components/ui'
 import { fmtDateTime } from '../format'
@@ -23,6 +26,8 @@ type Message = {
   fallback_from: string | null
   tools: ToolRecord[]
   actions?: ActionCardData[]
+  code_runs?: CodeRun[]
+  files?: ChatFileData[]
   error: string | null
   created_at: string
 }
@@ -35,6 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_jobs: 'Задания за период',
   get_batch_history: 'История партии',
   get_job_cost: 'Себестоимость задания',
+  export_data: 'Данные для расчёта',
   create_job: 'Создание задания',
 }
 
@@ -43,6 +49,8 @@ const EXAMPLES = [
   'Сколько свободного соевого воска?',
   'Какая себестоимость задания №27?',
   'Запланируй 200 свечей «Лаванда» на пятницу',
+  'Построй график расхода воска по неделям за квартал',
+  'Как изменится себестоимость свечи, если воск подорожает на 15%?',
 ]
 
 function ToolChips({ tools }: { tools: ToolRecord[] }) {
@@ -70,6 +78,9 @@ function ToolChips({ tools }: { tools: ToolRecord[] }) {
 
 function AssistantMessage({ message }: { message: Message }) {
   const failed = ['stopped', 'interrupted', 'error'].includes(message.status)
+  const files = message.files ?? []
+  // картинки, уже вставленные в текст ответа, второй раз не показываем
+  const shownInText = new Set(files.filter((f) => message.content.includes(`(${f.url})`)).map((f) => f.url))
   // Актуальный статус действий приходит с сервером; во время потока — из событий инструментов
   const cards: ActionCardData[] =
     message.actions && message.actions.length > 0
@@ -80,7 +91,33 @@ function AssistantMessage({ message }: { message: Message }) {
       <div className="rounded-lg border border-stone-200 bg-white px-4 py-3">
         {message.content ? (
           <div className="prose-chat text-sm leading-relaxed">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Файлы Code Interpreter отдаются только с токеном
+                img: ({ src, alt }) =>
+                  isChatFileUrl(typeof src === 'string' ? src : undefined) ? <AuthImage src={src as string} alt={alt} /> : <img src={src as string} alt={alt ?? ''} />,
+                a: ({ href, children }) =>
+                  isChatFileUrl(href) ? (
+                    <a
+                      href={href}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        const file = files.find((f) => f.url === href)
+                        void downloadChatFile(href, file?.filename ?? 'файл')
+                      }}
+                    >
+                      {children}
+                    </a>
+                  ) : (
+                    <a href={href} target="_blank" rel="noreferrer">
+                      {children}
+                    </a>
+                  ),
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
           </div>
         ) : message.status === 'streaming' ? (
           <span className="text-sm text-stone-400">Думаю…</span>
@@ -95,6 +132,8 @@ function AssistantMessage({ message }: { message: Message }) {
         {cards.map((card) => (
           <ActionCard key={card.id} initial={card} />
         ))}
+        <GeneratedFiles files={files} shownInText={shownInText} />
+        <CodeRuns runs={message.code_runs ?? []} />
         <ToolChips tools={message.tools} />
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 px-1 text-xs text-stone-400">
@@ -117,6 +156,9 @@ export default function AssistantPage() {
   const [streamingId, setStreamingId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<ChatFileData[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
@@ -156,9 +198,11 @@ export default function AssistantPage() {
         navigate(`/assistant/${cid}`, { replace: true })
       }
       const now = new Date().toISOString()
+      const attached = attachments
+      setAttachments([])
       setMessages((prev) => [
         ...prev,
-        { id: -1, role: 'user', content: question, status: 'complete', status_label: '', model: null, fallback_from: null, tools: [], error: null, created_at: now },
+        { id: -1, role: 'user', content: question, status: 'complete', status_label: '', model: null, fallback_from: null, tools: [], files: attached, error: null, created_at: now },
         { id: -2, role: 'assistant', content: '', status: 'streaming', status_label: 'Отвечает…', model: null, fallback_from: null, tools: [], error: null, created_at: now },
       ])
       setText('')
@@ -167,6 +211,7 @@ export default function AssistantPage() {
       await streamAnswer(
         cid,
         question,
+        attached.map((f) => f.id),
         {
           onStart: (d) => {
             setStreamingId(d.message_id)
@@ -179,9 +224,14 @@ export default function AssistantPage() {
               const tools = tool.status === 'finished' ? [...m.tools.filter((t) => t.status !== 'started' || t.name !== tool.name), tool] : [...m.tools, tool]
               return { ...m, tools }
             }),
+          onCode: (run) => patchLast((m) => ({ ...m, code_runs: [...(m.code_runs ?? []), run] })),
+          onFile: (file) => patchLast((m) => ({ ...m, files: [...(m.files ?? []), file] })),
           onDone: (d) =>
             patchLast((m) => ({
               ...m,
+              content: d.content ?? m.content,
+              code_runs: d.code_runs,
+              files: d.files,
               status: d.status as Message['status'],
               status_label: d.status_label,
               error: d.error,
@@ -203,6 +253,36 @@ export default function AssistantPage() {
       setStreamingId(null)
       setBusy(false)
       list.reload()
+    }
+  }
+
+  // Файл загружается сразу и прикрепляется к следующему вопросу
+  const attach = async (file: File) => {
+    setError(null)
+    setUploading(true)
+    try {
+      let cid = conversationId
+      if (!cid) {
+        const created = await api<Conversation>('/chat/conversations', { method: 'POST', body: {} })
+        cid = created.id
+        navigate(`/assistant/${cid}`, { replace: true })
+        list.reload()
+      }
+      const form = new FormData()
+      form.append('file', file)
+      const response = await fetch(`/api/chat/conversations/${cid}/files`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+        body: form,
+      })
+      const body = await response.json()
+      if (!response.ok) throw new ApiError(response.status, body.detail ?? 'Не удалось загрузить файл')
+      setAttachments((prev) => [...prev, body as ChatFileData])
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Не удалось загрузить файл')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -281,8 +361,15 @@ export default function AssistantPage() {
           )}
           {messages.map((m, i) =>
             m.role === 'user' ? (
-              <div key={`${m.id}-${i}`} className="flex justify-end">
+              <div key={`${m.id}-${i}`} className="flex flex-col items-end gap-1">
                 <div className="max-w-2xl whitespace-pre-wrap rounded-lg bg-amber-700 px-4 py-2 text-sm text-white">{m.content}</div>
+                {(m.files ?? []).length > 0 && (
+                  <div className="flex flex-wrap justify-end gap-1">
+                    {(m.files ?? []).map((f) => (
+                      <FileChip key={f.id} file={f} />
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <AssistantMessage key={`${m.id}-${i}`} message={m} />
@@ -291,7 +378,30 @@ export default function AssistantPage() {
           <div ref={bottomRef} />
         </div>
         <ErrorBanner message={error ?? detail.error} />
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 bg-white px-3 pt-2 text-xs">
+            <span className="text-stone-500">Прикреплено:</span>
+            {attachments.map((f) => (
+              <span key={f.id} className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5">
+                📎 {f.filename}
+                <button type="button" aria-label={`Убрать ${f.filename}`} onClick={() => setAttachments(attachments.filter((a) => a.id !== f.id))}>
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <form onSubmit={submit} className="flex gap-2 border-t border-stone-200 bg-white p-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.xlsx"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && attach(e.target.files[0])}
+          />
+          <Button type="button" disabled={busy || uploading} onClick={() => fileInputRef.current?.click()} title="Прикрепить CSV или Excel для анализа" aria-label="Прикрепить файл">
+            {uploading ? '…' : '📎'}
+          </Button>
           <textarea
             className="flex-1 resize-none rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none"
             rows={2}

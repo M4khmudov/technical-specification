@@ -28,6 +28,8 @@ class ToolContext:
     user: User
     conversation_id: int
     message_id: int
+    # Code Interpreter: файлы хода у провайдера (None — недоступен, например без ключа)
+    ci: Any = None
 
 
 @dataclass

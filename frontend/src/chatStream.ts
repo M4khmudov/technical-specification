@@ -2,6 +2,7 @@
 // поэтому читаем поток fetch вручную и разбираем события «event: …\ndata: …».
 
 import { ApiError, getToken } from './api'
+import type { ChatFileData, CodeRun } from './chatFiles'
 
 export type ToolRecord = {
   name: string
@@ -17,6 +18,8 @@ export type StreamHandlers = {
   onModel?: (data: { model: string; provider: string; fallback_from: string | null }) => void
   onDelta?: (text: string) => void
   onTool?: (data: ToolRecord) => void
+  onCode?: (data: CodeRun) => void
+  onFile?: (data: ChatFileData) => void
   onDone?: (data: {
     message_id: number
     status: string
@@ -25,19 +28,23 @@ export type StreamHandlers = {
     model: string | null
     fallback_from: string | null
     tools: ToolRecord[]
+    code_runs: CodeRun[]
+    content: string
+    files: ChatFileData[]
   }) => void
 }
 
 export async function streamAnswer(
   conversationId: number,
   text: string,
+  fileIds: number[],
   handlers: StreamHandlers,
   signal: AbortSignal,
 ): Promise<void> {
   const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() ?? ''}` },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, file_ids: fileIds }),
     signal,
   })
   if (!response.ok || !response.body) {
@@ -88,6 +95,12 @@ function dispatch(block: string, handlers: StreamHandlers) {
       break
     case 'tool':
       handlers.onTool?.(payload)
+      break
+    case 'code':
+      handlers.onCode?.(payload)
+      break
+    case 'file':
+      handlers.onFile?.(payload)
       break
     case 'done':
       handlers.onDone?.(payload)

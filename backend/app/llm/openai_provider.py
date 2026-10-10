@@ -11,6 +11,7 @@ from app.llm.types import (
     CodeExecuted,
     Completed,
     Event,
+    FileCited,
     LLMRequest,
     TextDelta,
     ToolCall,
@@ -84,6 +85,16 @@ def map_event(event: Any) -> Event | None:
             )
             return CodeExecuted(item.code or "", getattr(item, "container_id", None), outputs)
         return None
+    if kind == "response.output_text.annotation.added":
+        annotation = event.annotation
+        get = (
+            annotation.get
+            if isinstance(annotation, dict)
+            else lambda k: getattr(annotation, k, None)
+        )
+        if get("type") == "container_file_citation":
+            return FileCited(get("container_id"), get("file_id"), get("filename") or "")
+        return None
     if kind == "response.completed":
         response = event.response
         usage = getattr(response, "usage", None)
@@ -129,6 +140,9 @@ class OpenAIProvider:
         tools = to_tools(request)
         if tools:
             params["tools"] = tools
+        if request.code_interpreter is not None:
+            # логи выполнения кода — чтобы показать их и понять ошибку
+            params["include"] = ["code_interpreter_call.outputs"]
         if request.max_output_tokens:
             params["max_output_tokens"] = request.max_output_tokens
         try:
@@ -150,3 +164,36 @@ class OpenAIProvider:
                 retryable=retryable,
                 status=exc.status_code,
             ) from exc
+
+    # ---------------------------------------------------------------- файлы Code Interpreter
+
+    def _require_client(self) -> Any:
+        if self._client is None:
+            raise LLMError("OPENAI_API_KEY не задан", retryable=False)
+        return self._client
+
+    async def upload_file(self, filename: str, data: bytes) -> str:
+        client = self._require_client()
+        try:
+            uploaded = await client.files.create(file=(filename, data), purpose="user_data")
+        except openai.APIError as exc:
+            raise LLMError(f"file upload failed: {exc.__class__.__name__}", retryable=True) from exc
+        return uploaded.id
+
+    async def delete_file(self, file_id: str) -> None:
+        try:
+            await self._require_client().files.delete(file_id)
+        except openai.APIError:
+            pass  # файл всё равно удалится по сроку хранения; ответу это не мешает
+
+    async def list_generated_files(self, container_id: str) -> list[tuple[str, str]]:
+        client = self._require_client()
+        page = await client.containers.files.list(container_id, limit=100)
+        return [(f.id, f.path) for f in page.data if f.source == "assistant"]
+
+    async def download_container_file(self, container_id: str, file_id: str) -> bytes:
+        client = self._require_client()
+        response = await client.containers.files.content.retrieve(
+            file_id, container_id=container_id
+        )
+        return response.content  # HttpxBinaryResponseContent: тело уже прочитано

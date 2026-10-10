@@ -435,3 +435,120 @@ async def test_real_sdk_http_errors_are_classified():
         async for _ in OpenAIProvider("sk-test", timeout=5, client=client).stream(REQUEST, "gpt"):
             pass
     assert exc.value.retryable and exc.value.status == 429
+
+
+async def test_real_sdk_code_interpreter_events_and_files():
+    """Code Interpreter на настоящем SDK: вызов кода с логами, ссылка на файл контейнера,
+    список и скачивание файлов, include в запросе."""
+    import json as _json
+
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/responses"):
+            captured["body"] = _json.loads(request.content)
+            body = _sse(
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "sequence_number": 1,
+                    "item": {
+                        "type": "code_interpreter_call",
+                        "id": "ci_1",
+                        "container_id": "cntr_9",
+                        "code": "print(1)",
+                        "status": "completed",
+                        "outputs": [{"type": "logs", "logs": "1\n"}],
+                    },
+                },
+                {
+                    "type": "response.output_text.annotation.added",
+                    "item_id": "m1",
+                    "output_index": 1,
+                    "content_index": 0,
+                    "annotation_index": 0,
+                    "sequence_number": 2,
+                    "annotation": {
+                        "type": "container_file_citation",
+                        "container_id": "cntr_9",
+                        "file_id": "cfile_1",
+                        "filename": "chart.png",
+                        "start_index": 0,
+                        "end_index": 5,
+                    },
+                },
+            )
+            return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+        if path.endswith("/containers/cntr_9/files"):
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "cfile_1",
+                            "object": "container.file",
+                            "container_id": "cntr_9",
+                            "path": "/mnt/data/chart.png",
+                            "source": "assistant",
+                            "bytes": 3,
+                            "created_at": 0,
+                        },
+                        {
+                            "id": "cfile_0",
+                            "object": "container.file",
+                            "container_id": "cntr_9",
+                            "path": "/mnt/data/data.csv",
+                            "source": "user",
+                            "bytes": 3,
+                            "created_at": 0,
+                        },
+                    ],
+                    "first_id": "cfile_1",
+                    "last_id": "cfile_0",
+                    "has_more": False,
+                },
+            )
+        if path.endswith("/containers/cntr_9/files/cfile_1/content"):
+            return httpx.Response(200, content=b"PNG")
+        if path.endswith("/files"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "file-77",
+                    "object": "file",
+                    "bytes": 3,
+                    "created_at": 0,
+                    "filename": "d.csv",
+                    "purpose": "user_data",
+                    "status": "processed",
+                },
+            )
+        return httpx.Response(404)
+
+    client = openai.AsyncOpenAI(
+        api_key="sk-test",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    provider = OpenAIProvider("sk-test", timeout=5, client=client)
+    request = LLMRequest(
+        instructions="sys",
+        items=[UserMessage("график")],
+        code_interpreter=CodeInterpreterSpec(file_ids=("file-77",)),
+    )
+    events = [e async for e in provider.stream(request, "gpt-4.1")]
+
+    from app.llm.types import CodeExecuted, FileCited
+
+    code = next(e for e in events if isinstance(e, CodeExecuted))
+    assert (code.code, code.container_id) == ("print(1)", "cntr_9")
+    assert code.outputs[0]["logs"] == "1\n"
+    assert FileCited("cntr_9", "cfile_1", "chart.png") in events
+    assert captured["body"]["include"] == ["code_interpreter_call.outputs"]
+    assert captured["body"]["tools"][0]["container"]["file_ids"] == ["file-77"]
+
+    assert await provider.upload_file("d.csv", b"a,b") == "file-77"
+    assert await provider.list_generated_files("cntr_9") == [("cfile_1", "/mnt/data/chart.png")]
+    assert await provider.download_container_file("cntr_9", "cfile_1") == b"PNG"

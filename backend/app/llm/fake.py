@@ -25,6 +25,30 @@ class ScriptedProvider:
         self.name = name
         self.scripts = list(scripts)
         self.requests: list[tuple[str, LLMRequest]] = []
+        # «Файлы у провайдера»: загруженные нами и созданные «кодом модели» в контейнерах
+        self.uploaded: dict[str, tuple[str, bytes]] = {}
+        self.deleted: list[str] = []
+        self.containers: dict[str, dict[str, tuple[str, bytes]]] = {}
+
+    async def upload_file(self, filename: str, data: bytes) -> str:
+        file_id = f"file-{len(self.uploaded) + 1}"
+        self.uploaded[file_id] = (filename, data)
+        return file_id
+
+    async def delete_file(self, file_id: str) -> None:
+        self.deleted.append(file_id)
+
+    def add_generated(self, container_id: str, path: str, data: bytes) -> str:
+        files = self.containers.setdefault(container_id, {})
+        file_id = f"cfile-{container_id}-{len(files) + 1}"
+        files[file_id] = (path, data)
+        return file_id
+
+    async def list_generated_files(self, container_id: str) -> list[tuple[str, str]]:
+        return [(fid, path) for fid, (path, _) in self.containers.get(container_id, {}).items()]
+
+    async def download_container_file(self, container_id: str, file_id: str) -> bytes:
+        return self.containers[container_id][file_id][1]
 
     def push(self, *steps: Step) -> None:
         self.scripts.append(list(steps))

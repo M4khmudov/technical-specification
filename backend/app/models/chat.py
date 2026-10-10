@@ -3,12 +3,12 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, LargeBinary, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.models.enums import MessageRole, MessageStatus
+from app.models.enums import FileOrigin, MessageRole, MessageStatus
 from app.models.types import CreatedAt, str_enum
 
 
@@ -47,6 +47,10 @@ class ChatMessage(Base):
     fallback_from: Mapped[str | None] = mapped_column(String(100))
     # [{"name", "arguments", "ok", "summary"}] — какие инструменты вызваны и с чем
     tools: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
+    # [{"code", "logs", "error"}] — код, выполненный в Code Interpreter (раскрывается под ответом)
+    code_runs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
     error: Mapped[str | None] = mapped_column(Text)
     input_tokens: Mapped[int | None]
     output_tokens: Mapped[int | None]
@@ -54,3 +58,26 @@ class ChatMessage(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class ChatFile(Base):
+    """Файл диалога: загруженный пользователем (Excel/CSV для анализа) или созданный
+    кодом модели в Code Interpreter (график, таблица). Хранится у нас: контейнер
+    провайдера временный."""
+
+    __tablename__ = "chat_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    origin: Mapped[FileOrigin] = mapped_column(str_enum(FileOrigin, "file_origin"))
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int]
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[CreatedAt]

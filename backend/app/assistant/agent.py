@@ -11,6 +11,7 @@
 """
 
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,7 +20,9 @@ from app.assistant.pii import Pseudonymizer, StreamUnmasker
 from app.assistant.tools import ToolContext, ToolRegistry
 from app.llm.router import LLMRouter
 from app.llm.types import (
+    CodeExecuted,
     Completed,
+    FileCited,
     Item,
     LLMRequest,
     Started,
@@ -50,6 +53,8 @@ class TurnState:
     input_tokens: int = 0
     output_tokens: int = 0
     unmasker: StreamUnmasker | None = None
+    code_runs: list[dict[str, Any]] = field(default_factory=list)
+    containers: list[str] = field(default_factory=list)  # контейнеры Code Interpreter
 
     @property
     def content(self) -> str:
@@ -77,7 +82,13 @@ async def run_turn(
         state.unmasker = pii.stream_unmasker()
     for _ in range(MAX_STEPS):
         calls: list[ToolCall] = []
-        request = LLMRequest(instructions=instructions, items=items, tools=registry.specs())
+        request = LLMRequest(
+            instructions=instructions,
+            items=items,
+            tools=registry.specs(),
+            # файлы, выгруженные в этом ходе, попадают в контейнер следующего шага
+            code_interpreter=ctx.ci.spec() if ctx.ci is not None else None,
+        )
         async for event in llm.stream(request):
             if isinstance(event, Started):
                 state.model = event.model
@@ -97,6 +108,14 @@ async def run_turn(
                     yield ChatEvent("delta", {"text": text})
             elif isinstance(event, ToolCallRequested):
                 calls.append(event.call)
+            elif isinstance(event, CodeExecuted):
+                run = code_run(event, pii)
+                state.code_runs.append(run)
+                if event.container_id:
+                    state.containers.append(event.container_id)
+                yield ChatEvent("code", run)
+            elif isinstance(event, FileCited):
+                state.containers.append(event.container_id)
             elif isinstance(event, Completed):
                 state.input_tokens += event.input_tokens or 0
                 state.output_tokens += event.output_tokens or 0
@@ -128,3 +147,20 @@ async def run_turn(
 
     state.text.append(STEP_LIMIT_NOTE)
     yield ChatEvent("delta", {"text": STEP_LIMIT_NOTE})
+
+
+def code_run(event: CodeExecuted, pii: Pseudonymizer | None) -> dict[str, Any]:
+    """Выполненный код для показа под ответом. Ошибка кода — не ошибка чата: модель
+    видит трассировку и объясняет её, пользователь видит пометку «код завершился с ошибкой»."""
+    logs = "\n".join(str(o.get("logs", "")) for o in event.outputs if o.get("type") == "logs")
+    unmask = pii.unmask if pii else (lambda t: t)
+    last_line = logs.strip().splitlines()[-1] if logs.strip() else ""
+    failed = "Traceback (most recent call last)" in logs or bool(
+        re.match(r"^\w*(Error|Exception)\b", last_line)
+    )
+    return {
+        "code": unmask(event.code),
+        "logs": unmask(logs)[-4000:],
+        "error": failed,
+        "images": sum(1 for o in event.outputs if o.get("type") == "image"),
+    }

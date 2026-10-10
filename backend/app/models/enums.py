@@ -59,6 +59,11 @@ class MessageStatus(StrEnum):
     ERROR = "error"  # модель недоступна, ответа нет
 
 
+class FileOrigin(StrEnum):
+    UPLOAD = "upload"  # загрузил пользователь
+    GENERATED = "generated"  # создал код модели в Code Interpreter
+
+
 class ActionStatus(StrEnum):
     PENDING = "pending"  # ждёт «Подтвердить»
     CONFIRMED = "confirmed"  # выполнено

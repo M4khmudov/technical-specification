@@ -1,20 +1,22 @@
 from datetime import datetime
 from typing import Annotated, Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, UploadFile
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.assistant import chat as service
 from app.assistant import runner
+from app.assistant.code_interpreter import MAX_UPLOAD_BYTES
 from app.assistant.tool_set import action_card
 from app.assistant.tools import ToolRegistry, default_registry
 from app.core.errors import NotFoundError
 from app.llm.registry import get_llm
 from app.llm.router import LLMRouter
-from app.models import ChatMessage, Conversation
+from app.models import ChatFile, ChatMessage, Conversation
 from app.models.enums import MESSAGE_STATUS_LABELS, MessageRole, MessageStatus
 from app.services import actions
 
@@ -46,6 +48,8 @@ class MessageOut(BaseModel):
     fallback_from: str | None
     tools: list[dict[str, Any]]
     actions: list[dict[str, Any]] = []  # предложенные действия с актуальным статусом
+    code_runs: list[dict[str, Any]] = []  # код Code Interpreter (раскрывается под ответом)
+    files: list[dict[str, Any]] = []  # вложения вопроса или файлы, созданные кодом
     error: str | None
     created_at: datetime
 
@@ -66,16 +70,23 @@ class ActionOut(BaseModel):
 
 class QuestionIn(BaseModel):
     text: Annotated[str, Field(min_length=1, max_length=service.MAX_QUESTION_LENGTH)]
+    file_ids: Annotated[list[int], Field(max_length=5)] = []  # загруженные заранее файлы
 
 
 def conversation_out(c: Conversation) -> ConversationOut:
     return ConversationOut(id=c.id, title=c.title, created_at=c.created_at, updated_at=c.updated_at)
 
 
-def message_out(m: ChatMessage, cards: list[dict[str, Any]] | None = None) -> MessageOut:
+def message_out(
+    m: ChatMessage,
+    cards: list[dict[str, Any]] | None = None,
+    files: list[ChatFile] | None = None,
+) -> MessageOut:
     status = service.effective_status(m)
     return MessageOut(
         actions=cards or [],
+        code_runs=m.code_runs or [],
+        files=[runner.file_out(f) for f in files or []],
         id=m.id,
         role=m.role,
         content=m.content,
@@ -109,9 +120,10 @@ async def get_conversation(
     cards: dict[int, list[dict[str, Any]]] = {}
     for action in await actions.for_conversation(session, c.id):
         cards.setdefault(action.message_id, []).append(action_card(action))
+    files = await service.files_by_message(session, c.id)
     return ConversationDetailOut(
         **conversation_out(c).model_dump(),
-        messages=[message_out(m, cards.get(m.id)) for m in c.messages],
+        messages=[message_out(m, cards.get(m.id), files.get(m.id)) for m in c.messages],
     )
 
 
@@ -130,7 +142,9 @@ async def ask(
     tools: Annotated[ToolRegistry, Depends(get_tools)],
 ) -> StreamingResponse:
     """Задать вопрос. Ответ приходит потоком SSE: start, model, delta…, tool…, done."""
-    _, answer, items = await service.start_turn(session, user, conversation_id, data.text)
+    _, answer, items = await service.start_turn(
+        session, user, conversation_id, data.text, data.file_ids
+    )
     turn = runner.Turn(user.id, conversation_id, answer.id, items)
     return StreamingResponse(
         runner.stream_turn(turn, llm, tools),
@@ -160,3 +174,30 @@ async def confirm_action(action_id: int, session: SessionDep, user: CurrentUser)
 @router.post("/actions/{action_id}/reject")
 async def reject_action(action_id: int, session: SessionDep, user: CurrentUser) -> ActionOut:
     return ActionOut(**action_card(await actions.reject(session, user, action_id)))
+
+
+@router.post("/conversations/{conversation_id}/files", status_code=201)
+async def upload_file(
+    conversation_id: int, file: UploadFile, session: SessionDep, user: CurrentUser
+) -> dict[str, Any]:
+    """Загрузить CSV/XLSX для анализа. Прикрепляется к следующему вопросу (file_ids)."""
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    upload = await service.save_upload(
+        session, user, conversation_id, file.filename or "file.csv", data
+    )
+    return runner.file_out(upload)
+
+
+@router.get("/files/{file_id}")
+async def download_file(file_id: int, session: SessionDep, user: CurrentUser) -> Response:
+    chat_file = await service.get_file(session, user, file_id)
+    inline = chat_file.content_type.startswith("image/")
+    disposition = "inline" if inline else "attachment"
+    return Response(
+        chat_file.data,
+        media_type=chat_file.content_type,
+        headers={
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(chat_file.filename)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
