@@ -39,8 +39,8 @@ select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S"]
 ignore = ["B008"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
-"alembic/**" = ["E501"]
+"tests/**" = ["S101", "S105", "S106"]
+"alembic/**" = ["E501", "W291"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -47,8 +47,27 @@ async def engine():
 
 @pytest.fixture
 async def session(engine) -> AsyncIterator[AsyncSession]:
-    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
-        yield s
+    """Сессия внутри внешней транзакции, которая откатывается после теста.
+
+    commit() внутри кода превращается в SAVEPOINT, поэтому тесты не видят данных друг друга.
+    Для тестов конкурентности (несколько независимых соединений) нужен отдельный фикстур.
+    """
+    async with engine.connect() as conn:
+        trans = await conn.begin()
+        s = AsyncSession(
+            bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
+        try:
+            yield s
+        finally:
+            await s.close()
+            await trans.rollback()
+
+
+@pytest.fixture
+def session_factory(engine) -> async_sessionmaker[AsyncSession]:
+    """Фабрика настоящих независимых сессий (данные коммитятся по-настоящему)."""
+    return async_sessionmaker(engine, expire_on_commit=False)
 
 
 @pytest.fixture
