@@ -282,24 +282,41 @@ def parse_judgement(text: str) -> dict[str, Any]:
 
 
 async def judge(llm: LLMRouter, judge_input: dict[str, Any]) -> dict[str, Any]:
-    request = LLMRequest(
-        instructions=load_prompt("eval_judge"),
-        items=[UserMessage(json.dumps(judge_input, ensure_ascii=False, indent=2))],
-        max_output_tokens=500,
-    )
-    try:
-        text, started = await llm.complete(request)
-    except Exception as exc:  # noqa: BLE001 — судья не должен ронять прогон
-        return {"score": None, "verdict": f"судья недоступен: {type(exc).__name__}", "issues": []}
-    result = parse_judgement(text)
-    result["model"] = started.model if started else None
+    """Оценка LLM-судьи. Если судья не вернул JSON (у моделей с рассуждениями, например
+    gpt-oss, ответ может не уместиться), — один повтор с напоминанием о формате."""
+    payload = json.dumps(judge_input, ensure_ascii=False, indent=2)
+    result: dict[str, Any] = {}
+    for attempt in range(2):
+        text = payload if attempt == 0 else payload + "\n\nОтветь ТОЛЬКО одним JSON-объектом."
+        request = LLMRequest(
+            instructions=load_prompt("eval_judge"),
+            items=[UserMessage(text)],
+            max_output_tokens=1500,  # с запасом на рассуждения модели
+        )
+        try:
+            answer, started = await llm.complete(request)
+        except Exception as exc:  # noqa: BLE001 — судья не должен ронять прогон
+            return {
+                "score": None,
+                "verdict": f"судья недоступен: {type(exc).__name__}",
+                "issues": [],
+            }
+        result = parse_judgement(answer)
+        result["model"] = started.model if started else None
+        if result.get("score") is not None:
+            break
     return result
 
 
 # ---------------------------------------------------------------- отчёт
 
 
-def render_markdown(results: list[CaseResult], started_at: datetime, with_judge: bool) -> str:
+def render_markdown(
+    results: list[CaseResult],
+    started_at: datetime,
+    with_judge: bool,
+    skipped: list[str] | None = None,
+) -> str:
     passed = sum(r.passed for r in results)
     scores = [r.judge["score"] for r in results if r.judge and r.judge.get("score")]
     models = sorted({r.model for r in results if r.model})
@@ -313,6 +330,10 @@ def render_markdown(results: list[CaseResult], started_at: datetime, with_judge:
     if with_judge:
         avg = f"{sum(scores) / len(scores):.2f}" if scores else "—"
         lines.append(f"- **LLM-судья: средняя оценка {avg} из 5** ({len(scores)} оценок)")
+    if skipped:
+        lines.append(
+            f"- Пропущено (у провайдера нет файлов Code Interpreter): {', '.join(skipped)}"
+        )
     lines += [
         "",
         "Машинные проверки и оценка судьи независимы: «✅» — все машинные проверки вопроса прошли.",
@@ -392,7 +413,13 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
     llm, recorders = recording_router(llm or get_llm())
     started_at = datetime.now(UTC)
     results = []
+    skipped: list[str] = []
     for case in cases:
+        if case.requires_files and llm.files is None:
+            # Не провал модели: у провайдера нет файлов Code Interpreter (например, Groq)
+            print(f"→ {case.id}: пропущен — у провайдера нет файлов Code Interpreter")
+            skipped.append(f"{case.title} (`{case.id}`)")
+            continue
         print(f"→ {case.id}: ", end="", flush=True)
         result, judge_input = await run_case(case, llm, recorders, today)
         if result.status == "error" and args.retry_wait > 0:
@@ -414,7 +441,7 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
 
     args.out.mkdir(parents=True, exist_ok=True)
     stamp = started_at.strftime("%Y%m%d-%H%M%S")
-    markdown = render_markdown(results, started_at, not args.no_judge)
+    markdown = render_markdown(results, started_at, not args.no_judge, skipped)
     (args.out / f"{stamp}.md").write_text(markdown, encoding="utf-8")
     (args.out / "latest.md").write_text(markdown, encoding="utf-8")
     (args.out / f"{stamp}.json").write_text(

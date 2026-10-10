@@ -21,7 +21,12 @@ LEGAL_FORMS = r"(?:ООО|ОАО|ЗАО|ПАО|АО|ИП|LLC|Ltd\.?|GmbH|Inc\.?|
 QUOTES = "«»\"'„“”"
 EMPLOYEE = "Сотрудник"
 SUPPLIER = "Поставщик"
-PSEUDONYM_RE = re.compile(rf"\b({EMPLOYEE}|{SUPPLIER})-(\d+)\b", re.IGNORECASE)
+# Модель склоняет псевдоним и ставит разные дефисы: «Поставщиком‑1» (U+2011),
+# «Сотруднику – 2». Всё это — тот же псевдоним.
+HYPHENS = "\\-\u2010\u2011\u2012\u2013\u2014"
+PSEUDONYM_RE = re.compile(
+    rf"\b({EMPLOYEE}|{SUPPLIER})[а-яё]{{0,3}}\s?[{HYPHENS}]\s?(\d+)\b", re.IGNORECASE
+)
 
 # Падежные окончания (склонение фамилий на -ов/-ев/-ин и имён; оба рода)
 SURNAME_ENDINGS = ["", "а", "у", "ым", "ом", "е", "ой", "ою", "ы", "ых", "ым"]
@@ -169,7 +174,8 @@ class Pseudonymizer:
             return text
 
         def replace(m: re.Match) -> str:
-            entity = self._by_pseudonym.get(m.group(0).lower())
+            kind = EMPLOYEE if m.group(1).lower() == EMPLOYEE.lower() else SUPPLIER
+            entity = self._by_pseudonym.get(f"{kind}-{m.group(2)}".lower())
             return entity.name if entity else m.group(0)
 
         return PSEUDONYM_RE.sub(replace, text)
@@ -185,8 +191,11 @@ class StreamUnmasker:
     куска; flush() отдаёт остаток в конце ответа.
     """
 
-    _PREFIXES = (f"{EMPLOYEE}-".lower(), f"{SUPPLIER}-".lower())
-    _TAIL = re.compile(rf"({EMPLOYEE}|{SUPPLIER})-\d*$", re.IGNORECASE)
+    _PREFIXES = (EMPLOYEE.lower(), SUPPLIER.lower())
+    # «…Поставщиком‑1» — номер может продолжиться, а слово ещё может получить окончание
+    _TAIL = re.compile(
+        rf"({EMPLOYEE}|{SUPPLIER})[а-яё]{{0,3}}\s?(?:[{HYPHENS}]\s?\d*)?$", re.IGNORECASE
+    )
 
     def __init__(self, pseudonymizer: Pseudonymizer):
         self._p = pseudonymizer

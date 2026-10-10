@@ -321,3 +321,20 @@ def _handlers(module):
     probe = FastAPI()
     module.install(probe)
     return probe.exception_handlers
+
+
+# Найдено прогоном на настоящей модели (gpt-oss): она склоняет псевдоним и ставит
+# неразрывный дефис — обратная замена не срабатывала, пользователь видел «Поставщиком‑1».
+@pytest.mark.parametrize(
+    ("model_text", "shown"),
+    [
+        ("привезена **Поставщиком\u20111**.", "привезена **ООО «Восковой двор»**."),
+        ("у Поставщика\u20131", "у ООО «Восковой двор»"),
+        ("передал Сотруднику – 2", "передал Петров Иван Сергеевич"),
+        ("сотрудник-2 принял", "Петров Иван Сергеевич принял"),
+    ],
+)
+def test_declined_pseudonyms_and_other_hyphens_are_unmasked(model_text, shown):
+    assert PII.unmask(model_text) == shown
+    unmasker = PII.stream_unmasker()  # и в потоке по одному символу
+    assert "".join(unmasker.feed(ch) for ch in model_text) + unmasker.flush() == shown

@@ -67,6 +67,14 @@ def answer_mentions(obs: Observation, label: str, *variants: str) -> CheckResult
     return CheckResult(f"в ответе упомянуто: {label}", ok, "" if ok else f"искали: {variants}")
 
 
+def answer_matches(obs: Observation, label: str, *patterns: str) -> CheckResult:
+    """Как answer_mentions, но регулярными выражениями: «данных о продажах … нет»."""
+    import re
+
+    ok = any(re.search(p, obs.answer, re.IGNORECASE | re.S) for p in patterns)
+    return CheckResult(f"в ответе упомянуто: {label}", ok, "" if ok else f"шаблоны: {patterns}")
+
+
 def answer_avoids(obs: Observation, label: str, *variants: str) -> CheckResult:
     lower = obs.answer.lower()
     bad = [v for v in variants if v.lower() in lower]
