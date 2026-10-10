@@ -12,6 +12,9 @@ export default function Layout() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
           <span className="mr-4 font-semibold">🕯️ Свечная мастерская</span>
           <nav className="flex flex-wrap gap-1">
+            <NavLink to="/assistant" className={link}>
+              ✨ Ассистент
+            </NavLink>
             <NavLink to="/batches" className={link}>
               Партии
             </NavLink>

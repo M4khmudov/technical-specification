@@ -5,6 +5,7 @@ import { AuthProvider } from './auth'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
 import './index.css'
+import AssistantPage from './pages/AssistantPage'
 import AuditPage from './pages/AuditPage'
 import BatchesPage from './pages/BatchesPage'
 import BatchPage from './pages/BatchPage'
@@ -33,6 +34,8 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/jobs/:id" element={<JobPage />} />
             <Route path="/receipts/new" element={<ReceiptPage />} />
             <Route path="/audit" element={<AuditPage />} />
+            {/* Один маршрут: при создании диалога адрес меняется, а страница (и поток ответа) — нет */}
+            <Route path="/assistant/:id?" element={<AssistantPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

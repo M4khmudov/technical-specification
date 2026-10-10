@@ -46,6 +46,27 @@ class MarkingStatus(StrEnum):
     FAILED = "failed"  # попытки исчерпаны
 
 
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class MessageStatus(StrEnum):
+    STREAMING = "streaming"  # ответ ещё генерируется
+    COMPLETE = "complete"
+    STOPPED = "stopped"  # пользователь нажал «Остановить»
+    INTERRUPTED = "interrupted"  # оборвался: сбой модели или потеря соединения
+    ERROR = "error"  # модель недоступна, ответа нет
+
+
+MESSAGE_STATUS_LABELS = {
+    MessageStatus.STREAMING: "Отвечает…",
+    MessageStatus.COMPLETE: "Готово",
+    MessageStatus.STOPPED: "Остановлено пользователем",
+    MessageStatus.INTERRUPTED: "Ответ оборван",
+    MessageStatus.ERROR: "Ошибка",
+}
+
 ROLE_LABELS = {
     Role.STOREKEEPER: "Кладовщик",
     Role.TECHNOLOGIST: "Технолог",

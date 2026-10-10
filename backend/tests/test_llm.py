@@ -296,7 +296,6 @@ def test_system_prompt_is_a_file_with_substitutions():
         "assistant_system",
         today="10.10.2026",
         weekday="суббота",
-        user_name="Сотрудник-1",
         role="Технолог",
         memory="",
     )
