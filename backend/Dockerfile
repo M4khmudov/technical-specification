@@ -7,10 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN mkdir app && touch app/__init__.py && pip install ".[dev]" && rm -rf app
+RUN mkdir app && touch app/__init__.py && pip install "setuptools>=68" ".[dev]" && rm -rf app
 
 COPY . .
-RUN pip install --no-deps -e .
+RUN pip install --no-deps --no-build-isolation -e .
 
 COPY entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
