@@ -4,7 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import get_settings
 
-engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+# hide_parameters: значения запросов не попадают в тексты ошибок и логи (там могут быть
+# персональные данные)
+engine = create_async_engine(get_settings().database_url, pool_pre_ping=True, hide_parameters=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 

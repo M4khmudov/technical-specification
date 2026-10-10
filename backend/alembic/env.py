@@ -12,7 +12,8 @@ from app.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # не отключаем логгеры приложения, если миграции запускаются из того же процесса (тесты)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # URL можно переопределить через `alembic -x db_url=...` (используется в тестах)
 db_url = context.get_x_argument(as_dictionary=True).get("db_url") or get_settings().database_url

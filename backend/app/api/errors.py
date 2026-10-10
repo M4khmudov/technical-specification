@@ -86,7 +86,15 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def integrity_error(_: Request, exc: IntegrityError) -> JSONResponse:
-        logger.warning("integrity error: %s", exc.orig)
+        # Только имя ограничения и код: текст ошибки PostgreSQL содержит значения строки
+        # («Failing row contains …»), а в них могут быть ФИО и названия поставщиков
+        orig = exc.orig
+        logger.warning(
+            "integrity error: constraint=%s sqlstate=%s",
+            getattr(orig, "constraint_name", None)
+            or getattr(orig.__cause__, "constraint_name", None),
+            getattr(orig, "sqlstate", None) or getattr(orig.__cause__, "sqlstate", None),
+        )
         return JSONResponse(
             {
                 "detail": "Данные не сохранены: они противоречат текущему состоянию склада. "

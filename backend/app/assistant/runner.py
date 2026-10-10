@@ -22,6 +22,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import update
 
 from app.assistant.agent import ChatEvent, TurnState, run_turn
+from app.assistant.pii import load_pseudonymizer, mask_items
 from app.assistant.tools import ToolContext, ToolRegistry
 from app.db.session import SessionLocal
 from app.llm.errors import LLMInterruptedError, LLMUnavailableError
@@ -108,9 +109,13 @@ async def generate(
         async with SessionLocal() as session:
             user = await session.get(User, turn.user_id)
             ctx = ToolContext(session, user, turn.conversation_id, turn.message_id)
-            async for event in run_turn(llm, registry, ctx, system_prompt(user), turn.items, state):
+            # Имена сотрудников и поставщиков уходят в модель только псевдонимами
+            pii = await load_pseudonymizer(session)
+            items = mask_items(pii, turn.items)
+            async for event in run_turn(llm, registry, ctx, system_prompt(user), items, state, pii):
                 await queue.put(event)
     except asyncio.CancelledError:
+        state.flush()
         stopped = turn.message_id in _stop_requested
         status = MessageStatus.STOPPED if stopped else MessageStatus.INTERRUPTED
         error = None if stopped else "Соединение прервано до окончания ответа"
@@ -118,6 +123,7 @@ async def generate(
         queue.put_nowait(_done(turn, state, status, error))
         raise
     except LLMInterruptedError as exc:
+        state.flush()
         status, error = MessageStatus.INTERRUPTED, exc.user_message
     except LLMUnavailableError as exc:
         status = MessageStatus.INTERRUPTED if state.content else MessageStatus.ERROR
