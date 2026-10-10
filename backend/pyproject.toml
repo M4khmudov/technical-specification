@@ -44,6 +44,8 @@ ignore = ["B008"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106"]
 "alembic/**" = ["E501", "W291"]
+# тексты эталонных вопросов, эталонов и отчёта
+"app/evals/**" = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

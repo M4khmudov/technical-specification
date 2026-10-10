@@ -45,6 +45,9 @@ services:
   backend:
     build: ./backend
     environment: *backend-env
+    volumes:
+      # отчёты прогона эталонных вопросов (python -m app.evals.run) — наружу, в репозиторий
+      - ./backend/evals/reports:/app/evals/reports
     ports:
       - "8000:8000"
     depends_on:
