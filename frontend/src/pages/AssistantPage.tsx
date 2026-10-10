@@ -7,6 +7,7 @@ import { api, ApiError, getToken } from '../api'
 import type { ToolRecord } from '../chatStream'
 import { streamAnswer } from '../chatStream'
 import ActionCard from '../components/ActionCard'
+import MemoryPanel from '../components/MemoryPanel'
 import { downloadChatFile, isChatFileUrl } from '../chatFiles'
 import type { ChatFileData, CodeRun } from '../chatFiles'
 import { AuthImage, CodeRuns, FileChip, GeneratedFiles } from '../components/ChatFiles'
@@ -41,6 +42,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_batch_history: 'История партии',
   get_job_cost: 'Себестоимость задания',
   export_data: 'Данные для расчёта',
+  remember_fact: 'Память',
   create_job: 'Создание задания',
 }
 
@@ -129,6 +131,13 @@ function AssistantMessage({ message }: { message: Message }) {
             {message.error && `: ${message.error}`}
           </div>
         )}
+        {message.tools
+          .filter((t) => t.memory)
+          .map((t, i) => (
+            <div key={`mem-${i}`} className="mt-2 inline-block rounded bg-sky-50 px-2 py-1 text-xs text-sky-900">
+              🧠 {t.summary}
+            </div>
+          ))}
         {cards.map((card) => (
           <ActionCard key={card.id} initial={card} />
         ))}
@@ -157,6 +166,7 @@ export default function AssistantPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<ChatFileData[]>([])
+  const [memoryVersion, setMemoryVersion] = useState(0)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -253,6 +263,7 @@ export default function AssistantPage() {
       setStreamingId(null)
       setBusy(false)
       list.reload()
+      setMemoryVersion((v) => v + 1) // ассистент мог что-то запомнить
     }
   }
 
@@ -342,6 +353,7 @@ export default function AssistantPage() {
             </li>
           ))}
         </ul>
+        <MemoryPanel version={memoryVersion} />
       </aside>
 
       <section className="flex min-h-[70vh] flex-col rounded-lg border border-stone-200 bg-stone-50 md:h-[calc(100vh-8rem)]">

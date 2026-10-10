@@ -5,6 +5,7 @@ from app.models.audit import AuditLog
 from app.models.catalog import Material, Recipe, RecipeItem, Supplier
 from app.models.chat import ChatFile, ChatMessage, Conversation
 from app.models.marking import MarkingAttempt, MarkingReport
+from app.models.memory import UserMemory
 from app.models.production import JobMaterial, ProductionJob, Reservation
 from app.models.stock import Batch, BatchMovement, Receipt
 from app.models.user import User
@@ -28,4 +29,5 @@ __all__ = [
     "Reservation",
     "Supplier",
     "User",
+    "UserMemory",
 ]
