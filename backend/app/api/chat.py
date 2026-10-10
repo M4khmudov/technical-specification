@@ -49,6 +49,7 @@ class MessageOut(BaseModel):
     tools: list[dict[str, Any]]
     actions: list[dict[str, Any]] = []  # предложенные действия с актуальным статусом
     code_runs: list[dict[str, Any]] = []  # код Code Interpreter (раскрывается под ответом)
+    notes: list[str] = []  # предупреждения (например, числа не подтверждены данными)
     files: list[dict[str, Any]] = []  # вложения вопроса или файлы, созданные кодом
     error: str | None
     created_at: datetime
@@ -86,6 +87,7 @@ def message_out(
     return MessageOut(
         actions=cards or [],
         code_runs=m.code_runs or [],
+        notes=m.notes or [],
         files=[runner.file_out(f) for f in files or []],
         id=m.id,
         role=m.role,

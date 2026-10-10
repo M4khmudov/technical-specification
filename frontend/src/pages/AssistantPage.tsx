@@ -28,6 +28,7 @@ type Message = {
   tools: ToolRecord[]
   actions?: ActionCardData[]
   code_runs?: CodeRun[]
+  notes?: string[]
   files?: ChatFileData[]
   error: string | null
   created_at: string
@@ -141,6 +142,11 @@ function AssistantMessage({ message }: { message: Message }) {
         {cards.map((card) => (
           <ActionCard key={card.id} initial={card} />
         ))}
+        {(message.notes ?? []).map((note, i) => (
+          <div key={`note-${i}`} role="note" className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+            ⚠ {note}
+          </div>
+        ))}
         <GeneratedFiles files={files} shownInText={shownInText} />
         <CodeRuns runs={message.code_runs ?? []} />
         <ToolChips tools={message.tools} />
@@ -241,6 +247,7 @@ export default function AssistantPage() {
               ...m,
               content: d.content ?? m.content,
               code_runs: d.code_runs,
+              notes: d.notes,
               files: d.files,
               status: d.status as Message['status'],
               status_label: d.status_label,

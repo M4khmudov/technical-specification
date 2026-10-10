@@ -28,6 +28,7 @@ from app.assistant.code_interpreter import (
     rewrite_sandbox_links,
 )
 from app.assistant.pii import Pseudonymizer, load_pseudonymizer, mask_items
+from app.assistant.safety import UNGROUNDED_NOTE, ungrounded_numbers
 from app.assistant.tools import ToolContext, ToolRegistry
 from app.core.errors import DomainError
 from app.db.session import SessionLocal
@@ -93,6 +94,7 @@ async def _save(turn: Turn, state: TurnState, status: MessageStatus, error: str 
                 fallback_from=state.fallback_from,
                 tools=state.tools,
                 code_runs=state.code_runs,
+                notes=state.notes,
                 error=error,
                 input_tokens=state.input_tokens or None,
                 output_tokens=state.output_tokens or None,
@@ -136,6 +138,7 @@ def _done(
             "fallback_from": state.fallback_from,
             "tools": state.tools,
             "code_runs": state.code_runs,
+            "notes": state.notes,
             # итоговый текст: ссылки на файлы Code Interpreter заменены на наши
             "content": state.content,
             "files": [file_out(f) for f in files or []],
@@ -195,6 +198,18 @@ async def _finalize(session, turn: Turn, state: TurnState, ci: CodeInterpreterSe
     return files
 
 
+def check_grounding(state: TurnState, items: list[Item]) -> None:
+    """Числа без обращения к данным: модель ничего не запросила (ни инструментов, ни кода),
+    а в ответе есть значимые числа, которых нет ни в вопросе, ни в истории диалога."""
+    if state.tools or state.code_runs or not state.content:
+        return
+    sources = [getattr(i, "text", "") for i in items]
+    numbers = ungrounded_numbers(state.content, sources)
+    if numbers:
+        shown = ", ".join(format(n.normalize(), "f").replace(".", ",") for n in numbers[:5])
+        state.notes.append(UNGROUNDED_NOTE.format(numbers=shown))
+
+
 async def generate(
     turn: Turn, llm: LLMRouter, registry: ToolRegistry, queue: asyncio.Queue[ChatEvent]
 ) -> None:
@@ -208,7 +223,10 @@ async def generate(
             # Имена сотрудников и поставщиков уходят в модель только псевдонимами
             pii = await load_pseudonymizer(session)
             ci.pii = pii
-            ctx = ToolContext(session, user, turn.conversation_id, turn.message_id, ci=ci)
+            question = turn.items[-1].text if isinstance(turn.items[-1], UserMessage) else ""
+            ctx = ToolContext(
+                session, user, turn.conversation_id, turn.message_id, ci=ci, user_text=question
+            )
             items = await _attach_uploads(session, turn, ci, mask_items(pii, turn.items))
             # Память — строго факты этого пользователя (по user_id)
             facts = [f.text for f in await memory.list_facts(session, user)]
@@ -223,6 +241,7 @@ async def generate(
                 status = MessageStatus.INTERRUPTED if state.content else MessageStatus.ERROR
                 error = exc.user_message
             files = await _finalize(session, turn, state, ci)
+            check_grounding(state, turn.items)
             for f in files:
                 await queue.put(ChatEvent("file", file_out(f)))
     except asyncio.CancelledError:

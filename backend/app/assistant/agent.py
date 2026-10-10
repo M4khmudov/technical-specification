@@ -54,6 +54,7 @@ class TurnState:
     output_tokens: int = 0
     unmasker: StreamUnmasker | None = None
     code_runs: list[dict[str, Any]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)  # предупреждения под ответом
     containers: list[str] = field(default_factory=list)  # контейнеры Code Interpreter
 
     @property

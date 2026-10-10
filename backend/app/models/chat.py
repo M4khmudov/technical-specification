@@ -51,6 +51,8 @@ class ChatMessage(Base):
     code_runs: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, default=list, server_default="[]"
     )
+    # Предупреждения под ответом (например, числа не подтверждены данными)
+    notes: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     error: Mapped[str | None] = mapped_column(Text)
     input_tokens: Mapped[int | None]
     output_tokens: Mapped[int | None]

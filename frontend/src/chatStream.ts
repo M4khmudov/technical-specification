@@ -29,6 +29,7 @@ export type StreamHandlers = {
     fallback_from: string | null
     tools: ToolRecord[]
     code_runs: CodeRun[]
+    notes: string[]
     content: string
     files: ChatFileData[]
   }) => void
