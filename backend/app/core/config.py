@@ -30,9 +30,13 @@ class Settings(BaseSettings):
 
     # LLM: ключ выдаётся отдельно, в репозитории его нет
     openai_api_key: SecretStr | None = None
-    openai_model_primary: str = "gpt-4.1"
-    openai_model_fallback: str = "gpt-4.1-mini"
-    llm_timeout_seconds: float = Field(default=60.0, gt=0)
+    # Модели в формате «провайдер:модель»; запасная используется при 429/5xx/таймауте
+    llm_primary: str = "openai:gpt-4.1"
+    llm_fallback: str = "openai:gpt-4.1-mini"
+    # Таймауты каждого вызова: ожидание очередного события (в т.ч. первого токена)
+    # и весь ответ целиком
+    llm_event_timeout_seconds: float = Field(default=30.0, gt=0)
+    llm_timeout_seconds: float = Field(default=120.0, gt=0)
 
     jwt_secret: SecretStr = SecretStr("change-me-to-a-long-random-string-of-32-plus-chars")
 
