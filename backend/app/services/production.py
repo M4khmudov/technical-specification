@@ -129,8 +129,14 @@ def _describe_shortage(job: ProductionJob, shortage: dict[int, Decimal]) -> str:
     )
 
 
+def _codes(job: ProductionJob) -> dict[int, str]:
+    return {jm.material_id: jm.material.code for jm in job.materials}
+
+
 def _reservation_totals(job: ProductionJob) -> dict[str, str]:
-    return {str(mid): str(qty) for mid, qty in sorted(_reserved_by_material(job).items())}
+    """Резерв по материалам для журнала — по кодам, чтобы запись читалась человеком."""
+    codes = _codes(job)
+    return {codes[mid]: str(qty) for mid, qty in sorted(_reserved_by_material(job).items())}
 
 
 async def _reserve_deficits(session: AsyncSession, actor: User, job: ProductionJob) -> None:
@@ -387,7 +393,7 @@ async def complete_job(
         before={"status": JobStatus.IN_PROGRESS.value},
         after={
             "status": job.status.value,
-            "actual": {str(mid): str(q) for mid, q in sorted(actual.items())},
+            "actual": {_codes(job)[mid]: str(q) for mid, q in sorted(actual.items())},
         },
     )
     # Отчёт в сервис маркировки — в той же транзакции (outbox): завершение не ждёт
