@@ -7,6 +7,7 @@ import { api, ApiError, getToken } from '../api'
 import type { ToolRecord } from '../chatStream'
 import { streamAnswer } from '../chatStream'
 import ActionCard from '../components/ActionCard'
+import { useConfirm } from '../useConfirm'
 import MemoryPanel from '../components/MemoryPanel'
 import { downloadChatFile, isChatFileUrl } from '../chatFiles'
 import type { ChatFileData, CodeRun } from '../chatFiles'
@@ -173,6 +174,7 @@ export default function AssistantPage() {
   const [error, setError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<ChatFileData[]>([])
   const [memoryVersion, setMemoryVersion] = useState(0)
+  const [confirm, confirmDialog] = useConfirm()
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -331,7 +333,19 @@ export default function AssistantPage() {
   }
 
   const remove = async (cid: number) => {
-    if (!window.confirm('Удалить диалог?')) return
+    const title = list.data?.find((c) => c.id === cid)?.title
+    const ok = await confirm({
+      title: 'Удалить диалог?',
+      message: (
+        <>
+          {title && <span className="font-medium text-stone-800">«{title}»</span>}
+          {title && ' — '}сообщения и файлы диалога будут удалены без возможности восстановления.
+        </>
+      ),
+      confirmText: 'Удалить',
+      danger: true,
+    })
+    if (!ok) return
     await api(`/chat/conversations/${cid}`, { method: 'DELETE' })
     list.reload()
     if (cid === conversationId) navigate('/assistant')
@@ -339,6 +353,7 @@ export default function AssistantPage() {
 
   return (
     <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
+      {confirmDialog}
       <aside className="rounded-lg border border-stone-200 bg-white p-2 md:h-[calc(100vh-8rem)] md:overflow-y-auto">
         <Button variant="primary" className="mb-2 w-full" disabled={busy} onClick={() => navigate('/assistant')}>
           + Новый диалог

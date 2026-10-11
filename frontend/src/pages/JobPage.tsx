@@ -4,6 +4,8 @@ import { api } from '../api'
 import type { AuditEntry, Job, Marking } from '../api'
 import { useAuth } from '../auth'
 import AuditTable from '../components/AuditTable'
+import { useConfirm } from '../useConfirm'
+import type { ConfirmOptions } from '../components/ConfirmDialog'
 import { Badge, Button, Card, ErrorBanner, inputClass, Loading, TrafficLight } from '../components/ui'
 import { fmtDate, fmtDateTime, fmtMoney, fmtQty, isPositive } from '../format'
 import { useAction, useApi } from '../useApi'
@@ -145,12 +147,13 @@ export default function JobPage() {
   const history = useApi<AuditEntry[]>(`/jobs/${id}/history`)
   const action = useAction()
   const [completing, setCompleting] = useState(false)
+  const [confirm, confirmDialog] = useConfirm()
 
   if (loading && !job) return <Loading />
   if (!job) return <ErrorBanner message={error} />
 
-  const act = async (path: string, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return
+  const act = async (path: string, confirmOptions?: ConfirmOptions) => {
+    if (confirmOptions && !(await confirm(confirmOptions))) return
     const result = await action.run(() => api<Job>(`/jobs/${job.id}/${path}`, { method: 'POST' }))
     if (result) {
       setData(result)
@@ -164,6 +167,7 @@ export default function JobPage() {
 
   return (
     <div>
+      {confirmDialog}
       <Link to="/jobs" className="text-sm text-amber-800 hover:underline">
         ← Задания
       </Link>
@@ -201,7 +205,15 @@ export default function JobPage() {
           </Button>
         )}
         {['draft', 'planned'].includes(job.status) && manage && (
-          <Button variant="danger" disabled={action.busy} onClick={() => act('cancel', 'Отменить задание? Резервы будут сняты.')}>
+          <Button variant="danger" disabled={action.busy} onClick={() => act('cancel', {
+                title: `Отменить задание №${job.number}?`,
+                message: job.reservations.length
+                  ? 'Резервы материалов будут сняты и вернутся в свободный остаток. Отменённое задание нельзя вернуть.'
+                  : 'Отменённое задание нельзя вернуть.',
+                confirmText: 'Отменить задание',
+                cancelText: 'Не отменять',
+                danger: true,
+              })}>
             Отменить
           </Button>
         )}

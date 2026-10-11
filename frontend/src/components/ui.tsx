@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import type { Light } from '../api'
 
 export function ErrorBanner({ message }: { message: string | null }) {
@@ -15,7 +15,8 @@ export function Loading() {
 }
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'danger'
+  variant?: 'primary' | 'secondary' | 'danger' | 'dangerSolid'
+  ref?: Ref<HTMLButtonElement>
 }
 
 export function Button({ variant = 'secondary', className = '', ...props }: ButtonProps) {
@@ -23,6 +24,7 @@ export function Button({ variant = 'secondary', className = '', ...props }: Butt
     primary: 'bg-amber-700 text-white hover:bg-amber-800 border-amber-700',
     secondary: 'bg-white text-stone-800 hover:bg-stone-100 border-stone-300',
     danger: 'bg-white text-red-700 hover:bg-red-50 border-red-300',
+    dangerSolid: 'bg-red-700 text-white hover:bg-red-800 border-red-700',
   }[variant]
   return (
     <button
