@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { downloadChatFile, fetchBlob } from '../chatFiles'
+import { PaperclipIcon } from './Icons'
 import type { ChatFileData, CodeRun } from '../chatFiles'
 
 export function AuthImage({ src, alt }: { src: string; alt?: string }) {
@@ -38,7 +39,8 @@ export function FileChip({ file }: { file: ChatFileData }) {
       className="inline-flex items-center gap-1 rounded border border-stone-300 bg-white px-2 py-1 text-xs hover:bg-stone-50"
       title="Скачать"
     >
-      📎 {file.filename} <span className="text-stone-400">{sizeLabel(file.size)}</span>
+      <PaperclipIcon className="h-3.5 w-3.5 text-stone-500" />
+      {file.filename} <span className="text-stone-400">{sizeLabel(file.size)}</span>
       {error && <span className="text-red-700">— не удалось скачать</span>}
     </button>
   )

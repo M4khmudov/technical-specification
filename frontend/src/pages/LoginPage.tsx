@@ -25,7 +25,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-50 px-4">
       <form onSubmit={submit} className="w-full max-w-sm rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
-        <h1 className="mb-1 text-xl font-semibold">🕯️ Свечная мастерская</h1>
+        <h1 className="mb-1 text-xl font-semibold">Свечная мастерская</h1>
         <p className="mb-5 text-sm text-stone-500">Учёт склада и производства</p>
         <div className="space-y-3">
           <Field label="Логин">

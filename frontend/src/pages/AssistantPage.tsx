@@ -12,6 +12,7 @@ import MemoryPanel from '../components/MemoryPanel'
 import { downloadChatFile, isChatFileUrl } from '../chatFiles'
 import type { ChatFileData, CodeRun } from '../chatFiles'
 import { AuthImage, CodeRuns, FileChip, GeneratedFiles } from '../components/ChatFiles'
+import { PaperclipIcon } from '../components/Icons'
 import type { ActionCardData } from '../components/ActionCard'
 import { Button, ErrorBanner } from '../components/ui'
 import { fmtDateTime } from '../format'
@@ -417,7 +418,8 @@ export default function AssistantPage() {
             <span className="text-stone-500">Прикреплено:</span>
             {attachments.map((f) => (
               <span key={f.id} className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5">
-                📎 {f.filename}
+                <PaperclipIcon className="h-3.5 w-3.5 text-amber-800" />
+                {f.filename}
                 <button type="button" aria-label={`Убрать ${f.filename}`} onClick={() => setAttachments(attachments.filter((a) => a.id !== f.id))}>
                   ✕
                 </button>
@@ -434,7 +436,7 @@ export default function AssistantPage() {
             onChange={(e) => e.target.files?.[0] && attach(e.target.files[0])}
           />
           <Button type="button" disabled={busy || uploading} onClick={() => fileInputRef.current?.click()} title="Прикрепить CSV или Excel для анализа" aria-label="Прикрепить файл">
-            {uploading ? '…' : '📎'}
+            {uploading ? <span className="inline-block h-5 w-5 animate-pulse text-center">…</span> : <PaperclipIcon />}
           </Button>
           <textarea
             className="flex-1 resize-none rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none"
