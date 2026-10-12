@@ -30,10 +30,14 @@ def this_week(today: date | None = None) -> tuple[date, date]:
 
 class Period(BaseModel):
     date_from: date | None = Field(
-        None, description="Начало периода, ГГГГ-ММ-ДД. По умолчанию — понедельник текущей недели"
+        None,
+        description="Начало периода, ГГГГ-ММ-ДД. По умолчанию — понедельник текущей недели; "
+        "если указан только конец («до 26.10») — сегодня. Для одного дня укажи обе даты",
     )
     date_to: date | None = Field(
-        None, description="Конец периода включительно, ГГГГ-ММ-ДД. По умолчанию — воскресенье"
+        None,
+        description="Конец периода включительно, ГГГГ-ММ-ДД. По умолчанию — воскресенье; "
+        "если указано только начало («с 20.10») — через неделю после него",
     )
 
     @model_validator(mode="after")
@@ -42,9 +46,10 @@ class Period(BaseModel):
         if self.date_from is None and self.date_to is None:
             self.date_from, self.date_to = monday, sunday
         elif self.date_from is None:
-            self.date_from = self.date_to
+            # «до 26.10» — с сегодняшнего дня, а не один день 26.10
+            self.date_from = min(date.today(), self.date_to)
         elif self.date_to is None:
-            self.date_to = self.date_from
+            self.date_to = self.date_from + timedelta(days=6)
         if self.date_from > self.date_to:
             raise ValueError("date_from позже date_to")
         return self
@@ -298,15 +303,22 @@ async def export_data(ctx: ToolContext, args: ExportArgs) -> ToolOutcome:
             f"{table.name}: данных нет",
         )
     path = await ctx.ci.add(table.name, table.to_csv().encode("utf-8"))
+    output = {
+        "file": path,
+        "rows": len(table.rows),
+        "columns": table.columns,
+        "description": table.description,
+        "preview": [[str(v) for v in row] for row in table.rows[:5]],
+        "note": "Файл появится в /mnt/data в Code Interpreter. Числа в CSV — с точкой.",
+    }
+    if "material_code" in table.columns and "material_name" in table.columns:
+        # Модель ищет «соевый воск», а в данных «Воск соевый» — фильтр по подстроке
+        # названия промахивается. Даём точные коды.
+        code, name = table.columns.index("material_code"), table.columns.index("material_name")
+        output["materials"] = {row[code]: row[name] for row in table.rows}
+        output["note"] += " Фильтруй материалы по material_code из поля materials, не по названию."
     return ToolOutcome(
-        {
-            "file": path,
-            "rows": len(table.rows),
-            "columns": table.columns,
-            "description": table.description,
-            "preview": [[str(v) for v in row] for row in table.rows[:5]],
-            "note": "Файл появится в /mnt/data в Code Interpreter. Числа в CSV — с точкой.",
-        },
+        output,
         f"{table.name}: {len(table.rows)} строк",
     )
 

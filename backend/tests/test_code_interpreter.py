@@ -178,6 +178,8 @@ async def test_export_tool_uploads_masked_file(session):
     assert outcome.output["rows"] == 1
     # реальный путь в контейнере OpenAI: /mnt/data/<file_id>-<имя>
     assert outcome.output["file"].startswith("/mnt/data/file-1-receipts_")
+    # точные коды материалов: модель фильтрует по коду, а не по подстроке названия
+    assert outcome.output["materials"] == {wax.code: wax.name}
     ((filename, content),) = provider.uploaded.values()
     text = content.decode()
     assert "Медовый луг" not in text and f"Поставщик-{supplier.id}" in text

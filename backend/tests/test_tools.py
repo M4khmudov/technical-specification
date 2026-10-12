@@ -337,6 +337,17 @@ async def test_period_validation(session, shop):
     assert not outcome.ok
 
 
+def test_open_period_bounds():
+    from app.assistant.tool_set import Period
+
+    later = date.today() + timedelta(days=14)
+    # «до 26.10» — с сегодняшнего дня, а не один день
+    assert Period(date_to=later).date_from == date.today()
+    # «с 20.10» — неделя от начала
+    assert Period(date_from=later).date_to == later + timedelta(days=6)
+    assert Period(date_from=later, date_to=later).date_to == later
+
+
 def test_numbers_for_the_model_have_no_trailing_zeros():
     from app.assistant.agent import tidy_numbers
 
