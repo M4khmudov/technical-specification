@@ -25,5 +25,5 @@
 ## Часть 3 и сдача
 - [x] 17. REVIEW.md
 - [x] 18. README, финальная проверка (чистый клон: compose up, 356 тестов, ruff, eslint)
-- [ ] Прогон эталонных вопросов на ключе OpenAI → backend/evals/reports/latest.md
+- [x] Прогон эталонных вопросов на ключе OpenAI (gpt-4.1): 13/13, судья 4,69 → backend/evals/reports/latest.md
 - [ ] Видео до 5 минут
