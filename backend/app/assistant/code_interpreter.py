@@ -132,7 +132,9 @@ class CodeInterpreterSession:
         file_id = await self.store.upload_file(safe_name, mask_file(filename, data, self.pii))
         self.file_ids.append(file_id)
         self.filenames.append(safe_name)
-        return f"/mnt/data/{safe_name}"
+        # OpenAI кладёт загруженный файл в контейнер с префиксом идентификатора:
+        # /mnt/data/<file_id>-<имя> (проверено на реальном API)
+        return f"/mnt/data/{file_id}-{safe_name}"
 
     async def cleanup(self) -> None:
         if self.store is None:

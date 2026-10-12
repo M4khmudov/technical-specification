@@ -176,7 +176,8 @@ async def test_export_tool_uploads_masked_file(session):
 
     assert outcome.ok, outcome.output
     assert outcome.output["rows"] == 1
-    assert outcome.output["file"].startswith("/mnt/data/receipts_")
+    # реальный путь в контейнере OpenAI: /mnt/data/<file_id>-<имя>
+    assert outcome.output["file"].startswith("/mnt/data/file-1-receipts_")
     ((filename, content),) = provider.uploaded.values()
     text = content.decode()
     assert "Медовый луг" not in text and f"Поставщик-{supplier.id}" in text
@@ -348,7 +349,7 @@ async def test_uploaded_excel_is_analysed_with_pseudonyms(api, provider, session
 
     request = provider.requests[0][1]
     assert request.items[-1].text.endswith(
-        "[Файлы пользователя доступны в Code Interpreter: /mnt/data/продажи.xlsx]"
+        "[Файлы пользователя доступны в Code Interpreter: /mnt/data/file-1-продажи.xlsx]"
     )
     sent = load_workbook(io.BytesIO(provider.uploaded[request.code_interpreter.file_ids[0]][1]))
     values = [c.value for c in sent.active[2]]
