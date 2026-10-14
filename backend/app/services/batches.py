@@ -8,6 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core import clock
 from app.core.errors import ConflictError, DomainError, NotFoundError
+from app.core.numbers import require_whole
 from app.core.permissions import Permission, require
 from app.models import (
     AuditLog,
@@ -86,6 +87,10 @@ async def create_receipt(
     missing = material_ids - {m.id for m in materials}
     if missing:
         raise NotFoundError(f"Материал #{min(missing)} не найден")
+    by_id = {m.id: m for m in materials}
+    for line in data.lines:
+        material = by_id[line.material_id]
+        require_whole(material.name, material.unit, line.quantity)
 
     # Курсы получаем до любых записей в БД: если сервис курсов недоступен,
     # поступление не создаётся частично.

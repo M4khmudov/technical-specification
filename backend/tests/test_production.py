@@ -386,3 +386,18 @@ async def test_job_cost_total_is_the_sum_of_its_lines(session):
     job = await service.create_job(session, shop.user, job_in(shop, 1), plan=True)
     report = await analytics.job_cost_breakdown(session, job.number)
     assert report.job.cost_rub == sum((line.amount for line in report.lines), D("0"))
+
+
+async def test_pieces_must_be_whole(session):
+    """M2: 0,5 фитиля не бывает — ни в факте расхода, ни в поступлении."""
+    shop = await make_shop(session)
+    await batch(session, shop.wax, "10", day=1)
+    await batch(session, shop.wick, "100", day=1)
+    job = await started_job(session, shop)
+    with pytest.raises(DomainError, match="в штуках"):
+        await service.complete_job(
+            session,
+            shop.user,
+            job.id,
+            JobCompleteIn(actuals=[ActualIn(material_id=shop.wick.id, actual_qty=D("40.5"))]),
+        )

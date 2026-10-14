@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 from app.core import clock
 from app.core.errors import ConflictError, DomainError, NotFoundError
 from app.core.format import fmt_qty
+from app.core.numbers import require_whole
 from app.core.permissions import Permission, require
 from app.models import (
     Batch,
@@ -330,6 +331,8 @@ async def complete_job(
             raise DomainError(f"Материал #{item.material_id} не входит в задание №{job.number}")
         if item.material_id in actual:
             raise DomainError(f"Материал #{item.material_id} указан дважды")
+        material = by_material[item.material_id].material
+        require_whole(material.name, material.unit, item.actual_qty)
         actual[item.material_id] = item.actual_qty
     for mid, jm in by_material.items():
         actual.setdefault(mid, jm.required_qty)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import type { AuditEntry, Job, Marking } from '../api'
@@ -8,6 +8,7 @@ import { useConfirm } from '../useConfirm'
 import type { ConfirmOptions } from '../components/ConfirmDialog'
 import { Badge, Button, Card, ErrorBanner, inputClass, Loading, TrafficLight } from '../components/ui'
 import { fmtDate, fmtDateTime, fmtMoney, fmtQty, isPositive } from '../format'
+import { actualsPayload } from '../completion'
 import { useAction, useApi } from '../useApi'
 
 function CompleteForm({ job, onDone, onCancel }: { job: Job; onDone: (job: Job) => void; onCancel: () => void }) {
@@ -22,10 +23,10 @@ function CompleteForm({ job, onDone, onCancel }: { job: Job; onDone: (job: Job) 
       api<Job>(`/jobs/${job.id}/complete`, {
         method: 'POST',
         body: {
-          actuals: job.materials.map((m) => ({
-            material_id: m.material_id,
-            actual_qty: actual[m.material_id] || '0',
-          })),
+          actuals: actualsPayload(
+            job.materials.map((m) => m.material_id),
+            actual,
+          ),
         },
       }),
     )
@@ -36,6 +37,7 @@ function CompleteForm({ job, onDone, onCancel }: { job: Job; onDone: (job: Job) 
     <Card title="Завершение: фактический расход">
       <p className="mb-3 text-sm text-stone-600">
         Перерасход досписывается из свободного остатка по FIFO, экономия возвращается в партии.
+        Пустое поле — расход по норме.
       </p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {job.materials.map((m) => (
@@ -45,7 +47,8 @@ function CompleteForm({ job, onDone, onCancel }: { job: Job; onDone: (job: Job) 
             </span>
             <input
               className={inputClass}
-              inputMode="decimal"
+              inputMode={m.unit === 'шт' ? 'numeric' : 'decimal'}
+              placeholder={`по норме: ${fmtQty(m.required_qty)}`}
               value={actual[m.material_id]}
               onChange={(e) => setActual({ ...actual, [m.material_id]: e.target.value.replace(',', '.') })}
             />
@@ -76,12 +79,13 @@ function MarkingCard({ jobId, onDelivered }: { jobId: number; onDelivered: () =>
     return () => clearInterval(timer)
   }, [status, reload])
 
-  // Отчёт принят — статус задания сменился на «Сервис маркировки»
-  const [seenStatus, setSeenStatus] = useState(status)
-  if (status !== seenStatus) {
-    setSeenStatus(status)
-    if (seenStatus === 'pending' && status === 'sent') onDelivered()
-  }
+  // Отчёт принят — статус задания сменился на «Сервис маркировки». Родителя обновляем
+  // в эффекте, а не во время рендера
+  const previous = useRef(status)
+  useEffect(() => {
+    if (previous.current === 'pending' && status === 'sent') onDelivered()
+    previous.current = status
+  }, [status, onDelivered])
 
   if (!data) return error ? <ErrorBanner message={error} /> : null
 
