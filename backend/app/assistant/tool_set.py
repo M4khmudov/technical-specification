@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from app.assistant.safety import memory_problem, untrusted
+from app.assistant.safety import memory_problem, memory_text, untrusted
 from app.assistant.tools import Tool, ToolContext, ToolOutcome
 from app.core import clock
 from app.core.format import fmt_money, fmt_qty
@@ -276,6 +276,25 @@ class BatchArgs(ToolArgs):
     batch_number: Number = Field(description="Номер партии (как в реестре: «партия №12» → 12)")
 
 
+# Коды в данных — словами: модель пересказывала «операцию принять (accept)»
+MOVEMENT_LABELS = {
+    "receipt": "поступление",
+    "reserve": "резерв",
+    "release": "снятие резерва",
+    "consume": "списание",
+}
+AUDIT_LABELS = {
+    "create": "создание",
+    "accept": "приёмка",
+    "reject": "брак",
+    "plan": "планирование",
+    "reserve": "дозарезервирование",
+    "start": "запуск",
+    "complete": "завершение",
+    "cancel": "отмена",
+}
+
+
 async def get_batch_history(ctx: ToolContext, args: BatchArgs) -> ToolOutcome:
     batch_id = await analytics.batch_id_by_number(ctx.session, args.batch_number)
     h = await batches.get_batch_history(ctx.session, batch_id)
@@ -299,7 +318,7 @@ async def get_batch_history(ctx: ToolContext, args: BatchArgs) -> ToolOutcome:
         "movements": [
             {
                 "at": m.created_at.isoformat(),
-                "kind": m.kind.value,
+                "kind": MOVEMENT_LABELS.get(m.kind.value, m.kind.value),
                 "quantity": str(m.quantity),
                 "job_number": m.job_number,
                 "by": m.user_full_name,
@@ -308,7 +327,11 @@ async def get_batch_history(ctx: ToolContext, args: BatchArgs) -> ToolOutcome:
             for m in h.movements
         ],
         "status_changes": [
-            {"at": a.created_at.isoformat(), "action": a.action, "by": a.user_full_name}
+            {
+                "at": a.created_at.isoformat(),
+                "action": AUDIT_LABELS.get(a.action, a.action),
+                "by": a.user_full_name,
+            }
             for a in h.audit
         ],
     }
@@ -482,7 +505,8 @@ async def remember_fact(ctx: ToolContext, args: RememberArgs) -> ToolOutcome:
             f"Не запомнено: {problem.lower()}",
             ok=False,
         )
-    fact, created = await memory.remember(ctx.session, ctx.user, args.fact, ctx.conversation_id)
+    text = memory_text(args.fact, args.user_quote)
+    fact, created = await memory.remember(ctx.session, ctx.user, text, ctx.conversation_id)
     summary = f"Запомнил: {fact.text}" if created else f"Уже помню: {fact.text}"
     return ToolOutcome(
         {"saved": True, "new": created, "fact": fact.text},

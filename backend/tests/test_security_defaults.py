@@ -46,3 +46,13 @@ async def test_login_is_throttled_over_http(client):
         assert "Слишком много неудачных попыток" in response.json()["detail"]
     finally:
         login_throttle.succeeded(login)
+
+
+def test_lockout_is_per_address_not_per_account():
+    """Подбор с одного адреса не закрывает вход настоящему сотруднику с другого."""
+    throttle = LoginThrottle(max_failures=5, window=300)
+    for _ in range(5):
+        throttle.failed("sklad", "10.0.0.66")
+    with pytest.raises(TooManyRequestsError):
+        throttle.check("sklad", "10.0.0.66")
+    throttle.check("sklad", "10.0.0.7")  # сотрудник со своего компьютера входит

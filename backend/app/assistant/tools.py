@@ -92,7 +92,7 @@ class ToolRegistry:
                 f"лишний аргумент «{'.'.join(str(p) for p in e['loc'])}» — такого нет "
                 f"(есть: {allowed})"
                 if e["type"] == "extra_forbidden"
-                else f"{'.'.join(str(p) for p in e['loc']) or 'аргументы'}: {e['msg']}"
+                else f"{'.'.join(str(p) for p in e['loc']) or 'аргументы'}: {_reason(e)}"
                 for e in exc.errors()
             )
             return _error(f"Некорректные аргументы: {problems}"), raw
@@ -120,6 +120,15 @@ async def _recover(ctx: ToolContext) -> None:
     await ctx.session.rollback()
     if inspect(ctx.user).persistent:
         await ctx.session.refresh(ctx.user)
+
+
+def _reason(error: dict) -> str:
+    """Причина ошибки валидации по-русски (как в ответах API), без «Value error, …»."""
+    from app.api.errors import _message
+
+    if error["type"] == "value_error" and error.get("ctx", {}).get("error"):
+        return str(error["ctx"]["error"])
+    return _message(error)
 
 
 def _error(message: str) -> ToolOutcome:

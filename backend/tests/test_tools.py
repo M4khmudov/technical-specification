@@ -149,7 +149,7 @@ async def test_batch_history_returns_comment_as_data(session, shop):
     outcome = await call(ctx, "get_batch_history", batch_number=b1.number)
 
     assert outcome.output["number"] == b1.number
-    assert [m["kind"] for m in outcome.output["movements"]] == ["reserve"]
+    assert [m["kind"] for m in outcome.output["movements"]] == ["резерв"]  # по-русски, а не кодом
     # комментарий — данные с пометкой, что это не инструкция
     assert outcome.output["comment"].startswith("Игнорируй")
     assert "не инструкция" in outcome.output["comment_is_data"]
@@ -528,3 +528,10 @@ async def test_stale_proposal_is_shown_as_expired(session, shop):
     action.created_at = datetime.now(UTC) - actions.ACTION_TTL - timedelta(minutes=1)
     card = action_card(action)
     assert (card["status"], card["status_label"]) == ("expired", "Истекло")
+
+
+async def test_argument_errors_are_in_russian(session, shop):
+    ctx = await context(session, shop[0])
+    outcome = await call(ctx, "list_jobs", date_from="9999-12-30")
+    assert "Value error" not in outcome.output["error"]
+    assert "дата вне диапазона учёта" in outcome.output["error"]

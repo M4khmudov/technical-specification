@@ -48,8 +48,10 @@ async def resend_due_marking_reports(ctx: dict) -> int:
     async with SessionLocal() as session:
         ids = await marking.due_report_ids(session)
     for report_id in ids:
-        async with SessionLocal() as session:
-            await marking.send_report(session, report_id, ctx["marking_client"])
+        # Тем же путём, что отложенная задача: после неудачи ставится следующая попытка
+        # с растущей паузой. Раньше повтор после попытки cron ждал следующего тика (30 с),
+        # и паузы были 30, 30, 30 с вместо 5, 10, 20…
+        await send_marking_report(ctx, report_id)
     return len(ids)
 
 

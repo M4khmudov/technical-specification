@@ -141,7 +141,7 @@ docker compose up -d --build
 ## Тесты и проверки
 
 ```bash
-cd backend && python -m pytest -q          # 530 тестов на PostgreSQL (127.0.0.1:5433), сеть не нужна
+cd backend && python -m pytest -q          # 536 тестов на PostgreSQL (127.0.0.1:5433), сеть не нужна
 cd backend && ruff check . && ruff format --check .
 cd backend && python scripts/check_mutants.py   # 12 мутаций кода — все должны быть пойманы
 cd frontend && npm run lint && npx tsc -b && npm test && npm run build

@@ -104,22 +104,29 @@ def memory_problem(fact: str, quote: str, user_text: str, data_seen: list[str]) 
     Запоминается только сказанное пользователем: модель передаёт дословную цитату из
     его сообщения, и мы проверяем её по настоящему тексту. Проверка по пересечению слов
     факта с вопросом обходилась — достаточно было спросить о комментарии со словами
-    из него. Теперь нужна цитата, которой нет в данных этого хода, а факт должен быть
-    пересказом этой цитаты."""
+    из него. Теперь нужна цитата, которой нет в данных этого хода."""
     norm_quote = _normalize(quote)
     if len(norm_quote) < 5 or norm_quote not in _normalize(user_text):
         return "Цитаты нет в сообщении пользователя"
     if any(norm_quote in _normalize(d) for d in data_seen):
         return "Цитата взята из данных (комментарий, файл, результат инструмента)"
-    if _CONTROL.search(fact):
+    if _CONTROL.search(fact) or _CONTROL.search(quote):
         return "Память не меняет правила работы ассистента, подтверждения и права"
-    stems = _fact_stems(fact)
-    if not stems:
-        return "Факт пустой"
-    matched = sum(1 for s in stems if s in norm_quote)
-    if matched == 0 or matched / len(stems) < 0.34:
-        return "Факт не следует из цитаты пользователя"
     return None
+
+
+def memory_text(fact: str, quote: str) -> str:
+    """Что сохранить: формулировку модели, если она пересказывает цитату, иначе — слова
+    самого пользователя. Модель пишет «Предпочитает краткие ответы» на «пиши покороче» —
+    по словам не сверить, а отказывать в легитимном факте нельзя; сохраняя цитату, мы
+    не теряем факт и не даём модели подменить его текстом из данных."""
+    stems = _fact_stems(fact)
+    norm_quote = _normalize(quote)
+    matched = sum(1 for s in stems if s in norm_quote)
+    if stems and matched / len(stems) >= 0.34:
+        return fact.strip()
+    words = quote.strip().strip(".!?,;: ")
+    return words[:1].upper() + words[1:]
 
 
 _MONTHS = "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря"

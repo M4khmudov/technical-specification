@@ -1,8 +1,9 @@
 """Ограничение попыток входа: подбор пароля к учётной записи.
 
-После MAX_FAILURES неудачных попыток за WINDOW по одному логину вход по нему
-закрывается до конца окна. Удачный вход сбрасывает счётчик. Состояние — в памяти
-процесса (бэкенд запускается одним процессом).
+После MAX_FAILURES неудачных попыток за WINDOW с одного адреса по одному логину вход
+с этого адреса закрывается до конца окна. Считается пара «логин + адрес»: иначе любой,
+зная логин, пятью неверными паролями закрывал бы вход настоящему сотруднику. Удачный
+вход сбрасывает счётчик. Состояние — в памяти процесса (бэкенд — один процесс).
 """
 
 import time
@@ -20,26 +21,30 @@ class LoginThrottle:
         self.window = window
         self._failures: dict[str, deque[float]] = defaultdict(deque)
 
-    def _recent(self, login: str) -> deque[float]:
-        attempts = self._failures[login.strip().lower()]
+    @staticmethod
+    def _key(login: str, client: str) -> str:
+        return f"{login.strip().lower()}|{client}"
+
+    def _recent(self, login: str, client: str = "") -> deque[float]:
+        attempts = self._failures[self._key(login, client)]
         border = time.monotonic() - self.window
         while attempts and attempts[0] < border:
             attempts.popleft()
         return attempts
 
-    def check(self, login: str) -> None:
-        attempts = self._recent(login)
+    def check(self, login: str, client: str = "") -> None:
+        attempts = self._recent(login, client)
         if len(attempts) >= self.max_failures:
             wait = int(attempts[0] + self.window - time.monotonic()) // 60 + 1
             raise TooManyRequestsError(
                 f"Слишком много неудачных попыток входа. Попробуйте через {wait} мин."
             )
 
-    def failed(self, login: str) -> None:
-        self._recent(login).append(time.monotonic())
+    def failed(self, login: str, client: str = "") -> None:
+        self._recent(login, client).append(time.monotonic())
 
-    def succeeded(self, login: str) -> None:
-        self._failures.pop(login.strip().lower(), None)
+    def succeeded(self, login: str, client: str = "") -> None:
+        self._failures.pop(self._key(login, client), None)
 
 
 login_throttle = LoginThrottle()

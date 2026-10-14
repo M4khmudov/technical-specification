@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -44,13 +44,16 @@ def user_out(user: User) -> UserOut:
 
 
 @router.post("/login")
-async def login(data: LoginIn, session: SessionDep) -> TokenOut:
-    login_throttle.check(data.login)  # подбор пароля: не больше 5 ошибок за 5 минут
+async def login(data: LoginIn, session: SessionDep, request: Request) -> TokenOut:
+    # Подбор пароля: не больше 5 ошибок за 5 минут с одного адреса по одному логину.
+    # Адрес клиента за nginx — из X-Forwarded-For (uvicorn --proxy-headers)
+    client = request.client.host if request.client else ""
+    login_throttle.check(data.login, client)
     user = await session.scalar(select(User).where(User.login == data.login))
     if user is None or not user.is_active or not verify_password(data.password, user.password_hash):
-        login_throttle.failed(data.login)
+        login_throttle.failed(data.login, client)
         raise UnauthorizedError("Неверный логин или пароль")
-    login_throttle.succeeded(data.login)
+    login_throttle.succeeded(data.login, client)
     return TokenOut(access_token=create_access_token(user.id), user=user_out(user))
 
 

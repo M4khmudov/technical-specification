@@ -84,3 +84,13 @@ async def test_cron_sends_only_due_reports(session_factory):
     async with session_factory() as s:
         assert (await s.get(MarkingReport, due)).status == MarkingStatus.SENT
         assert (await s.get(MarkingReport, later)).status == MarkingStatus.PENDING
+
+
+async def test_cron_attempt_schedules_the_next_one(session_factory):
+    """S5: неудачная попытка периодической задачи тоже ставит следующую с паузой —
+    иначе повтор ждал следующего тика cron (30 с) и паузы не росли."""
+    report_id = await committed_report(session_factory)
+    redis = FakeRedis()
+    ctx = {"marking_client": FakeMarkingService("500").client(), "redis": redis}
+    await resend_due_marking_reports(ctx)
+    assert any(args == (report_id,) and "_defer_until" in kw for _, args, kw in redis.jobs)
