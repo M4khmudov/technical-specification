@@ -398,3 +398,19 @@ async def test_files_are_private(api, provider, session_factory):
         f"/api/chat/conversations/{mine}/messages", json={"text": "x", "file_ids": [foreign.id]}
     )
     assert response.status_code == 404
+
+
+def test_links_to_files_with_spaces_and_brackets_are_rewritten():
+    """M9: «график расхода (1).png» — ссылка на наш файл, а не «файл недоступен»."""
+    from types import SimpleNamespace
+
+    from app.assistant.code_interpreter import rewrite_sandbox_links
+
+    chart = SimpleNamespace(id=7, filename="график расхода (1).png")
+    text = (
+        "[Скачать](sandbox:/mnt/data/график расхода (1).png) и "
+        "![](sandbox:/mnt/data/график%20расхода%20%281%29.png)"
+    )
+    assert rewrite_sandbox_links(text, [chart], None) == (
+        "[Скачать](/api/chat/files/7) и ![](/api/chat/files/7)"
+    )

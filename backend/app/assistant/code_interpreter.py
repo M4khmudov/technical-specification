@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -287,8 +288,28 @@ async def collect_generated(
     return saved, problems
 
 
+def _spellings(name: str) -> set[str]:
+    """Как модель может записать имя файла в ссылке: как есть или с %-кодированием
+    пробелов и скобок (целиком или частично)."""
+    spaces = name.replace(" ", "%20")
+    return {
+        name,
+        spaces,
+        spaces.replace("(", "%28").replace(")", "%29"),
+        quote(name),
+    }
+
+
 def rewrite_sandbox_links(text: str, files: list[ChatFile], pii: Pseudonymizer | None) -> str:
-    """«sandbox:/mnt/data/chart.png» → адрес нашего файла (по имени)."""
+    """«sandbox:/mnt/data/chart.png» → адрес нашего файла (по имени).
+
+    Сначала — точные имена известных файлов: в них бывают пробелы и скобки
+    («график (1).png»), на которых обрывается общее правило ссылки."""
+    for f in sorted(files, key=lambda f: len(f.filename), reverse=True):
+        names = {f.filename, pii.mask(f.filename) if pii else f.filename}
+        for name in names:
+            for variant in _spellings(name):
+                text = text.replace(f"sandbox:/mnt/data/{variant}", f"/api/chat/files/{f.id}")
     by_name = {f.filename: f for f in files}
 
     def replace(match: re.Match) -> str:

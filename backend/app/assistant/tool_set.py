@@ -505,11 +505,12 @@ async def create_job(ctx: ToolContext, args: CreateJobArgs) -> ToolOutcome:
 
 
 def action_card(action) -> dict[str, Any]:
+    status = actions.effective_status(action)
     return {
         "id": action.id,
         "kind": action.kind,
-        "status": action.status.value,
-        "status_label": ACTION_STATUS_LABELS[action.status],
+        "status": status.value,
+        "status_label": ACTION_STATUS_LABELS[status],
         "preview": action.preview,
         "result": action.result,
         "error": action.error,

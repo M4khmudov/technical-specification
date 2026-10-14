@@ -511,3 +511,20 @@ async def test_recipe_costs_ignore_rejected_batches(session):
     table = await exports.recipe_costs(session)
     (row,) = [r for r in table.rows if r[1] == "M5-WAX"]
     assert row[5] == D("300")
+
+
+async def test_stale_proposal_is_shown_as_expired(session, shop):
+    """M9: просроченное предложение не показывается «Ждёт подтверждения»."""
+    from datetime import UTC, datetime
+
+    from app.assistant.tool_set import action_card
+
+    technologist, *_ = shop
+    ctx = await context(session, technologist)
+    outcome = await call(
+        ctx, "create_job", recipe="Лаванда тест", quantity=5, planned_on=IN_WEEK.isoformat()
+    )
+    action = await session.get(AssistantAction, outcome.extra["action"]["id"])
+    action.created_at = datetime.now(UTC) - actions.ACTION_TTL - timedelta(minutes=1)
+    card = action_card(action)
+    assert (card["status"], card["status_label"]) == ("expired", "Истекло")

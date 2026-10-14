@@ -100,6 +100,14 @@ async def _recipe_items(session: AsyncSession, recipe_id: int) -> list[RecipeIte
     return list(rows.all())
 
 
+def effective_status(action: AssistantAction) -> ActionStatus:
+    """Статус для показа: предложение, которое не подтвердили вовремя, — «Устарело»,
+    даже если в базе оно ещё «ждёт» (в базе статус меняется при попытке подтвердить)."""
+    if action.status == ActionStatus.PENDING and _now() - action.created_at > ACTION_TTL:
+        return ActionStatus.EXPIRED
+    return action.status
+
+
 async def _locked(session: AsyncSession, user: User, action_id: int) -> AssistantAction:
     action = await session.scalar(
         select(AssistantAction)
