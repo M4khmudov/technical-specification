@@ -122,9 +122,15 @@ def memory_problem(fact: str, quote: str, user_text: str, data_seen: list[str]) 
     return None
 
 
+_MONTHS = "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря"
+_DATE_WORDS = re.compile(rf"\b\d{{1,2}}\s+(?:{_MONTHS})\b", re.IGNORECASE)
+
+
 def _significant(text: str) -> list[Decimal]:
-    """Числа, которые стоит проверять: без дат, годов и мелких счётных (≤ 10)."""
+    """Числа, которые стоит проверять: без дат (и «12 августа»), годов, номеров и мелких
+    счётных (≤ 10)."""
     cleaned = _DATE.sub(" ", text)
+    cleaned = _DATE_WORDS.sub(" ", cleaned)
     cleaned = re.sub(r"№\s*\d+", " ", cleaned)  # номера заданий и партий
     return [
         n
@@ -133,12 +139,29 @@ def _significant(text: str) -> list[Decimal]:
     ]
 
 
+def _derived(n: Decimal, grounded: list[Decimal]) -> bool:
+    """Число — простая арифметика над подтверждёнными числами того же ответа: разность
+    «было 181,15 → стало 192,98, рост 11,83», сумма двух строк, доля в процентах."""
+    rel = Decimal("0.005")
+    for i, a in enumerate(grounded):
+        for b in grounded[i + 1 :]:
+            candidates = [a + b, abs(a - b)]
+            if b:
+                candidates.append(a / b * 100)
+            if a:
+                candidates.append(b / a * 100)
+            if any(close(n, c, rel=rel, abs_=Decimal("0.011")) for c in candidates):
+                return True
+    return False
+
+
 def ungrounded_numbers(answer: str, sources: list[str]) -> list[Decimal]:
-    """Значимые числа ответа, которых нет ни в одном источнике (с допуском на округление)."""
+    """Значимые числа ответа, которых нет ни в одном источнике (с допуском на округление)
+    и которые не выводятся из подтверждённых чисел этого же ответа."""
     known = [n for s in sources for n in numbers_in(s)]
-    return [
-        n for n in _significant(answer) if not any(close(n, k, rel=Decimal("0.005")) for k in known)
-    ]
+    numbers = _significant(answer)
+    grounded = [n for n in numbers if any(close(n, k, rel=Decimal("0.005")) for k in known)]
+    return [n for n in numbers if n not in grounded and not _derived(n, grounded)]
 
 
 UNGROUNDED_NOTE = (
