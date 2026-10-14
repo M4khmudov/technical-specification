@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import DomainError
@@ -91,12 +92,24 @@ class ToolRegistry:
             return await tool.handler(ctx, args), args.model_dump(mode="json")
         except DomainError as exc:
             # Отказ по правам, «не найдено», «не хватает» — понятный текст и для модели
-            await ctx.session.rollback()
+            await _recover(ctx)
             return _error(exc.message), args.model_dump(mode="json")
         except Exception:
             logger.exception("tool %s failed", call.name)
-            await ctx.session.rollback()
+            await _recover(ctx)
             return _error("Внутренняя ошибка при получении данных"), args.model_dump(mode="json")
+
+
+async def _recover(ctx: ToolContext) -> None:
+    """Откатить несохранённое после ошибки и вернуть сессию в рабочее состояние.
+
+    rollback() помечает все объекты сессии устаревшими, в том числе ctx.user. Следующий
+    инструмент в том же ответе читал user.role, а ленивая подгрузка в async-сессии
+    невозможна — и «модель ошиблась → исправилась» заканчивалось внутренней ошибкой.
+    """
+    await ctx.session.rollback()
+    if inspect(ctx.user).persistent:
+        await ctx.session.refresh(ctx.user)
 
 
 def _error(message: str) -> ToolOutcome:

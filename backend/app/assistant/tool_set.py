@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from app.assistant.safety import fact_is_from_user, untrusted
 from app.assistant.tools import Tool, ToolContext, ToolOutcome
@@ -28,13 +28,26 @@ def this_week(today: date | None = None) -> tuple[date, date]:
     return monday, monday + timedelta(days=6)
 
 
+MIN_DATE, MAX_DATE = date(2000, 1, 1), date(2100, 12, 31)
+
+
+def _in_range(value: date) -> date:
+    if not MIN_DATE <= value <= MAX_DATE:
+        raise ValueError(f"дата вне диапазона учёта ({MIN_DATE:%Y}–{MAX_DATE:%Y})")
+    return value
+
+
+# Дата из аргументов модели. Без границ «9999-12-30 + неделя» роняет расчёт периода
+ToolDate = Annotated[date, AfterValidator(_in_range)]
+
+
 class Period(BaseModel):
-    date_from: date | None = Field(
+    date_from: ToolDate | None = Field(
         None,
         description="Начало периода, ГГГГ-ММ-ДД. По умолчанию — понедельник текущей недели; "
         "если указан только конец («до 26.10») — сегодня. Для одного дня укажи обе даты",
     )
-    date_to: date | None = Field(
+    date_to: ToolDate | None = Field(
         None,
         description="Конец периода включительно, ГГГГ-ММ-ДД. По умолчанию — воскресенье; "
         "если указано только начало («с 20.10») — через неделю после него",
@@ -274,10 +287,10 @@ class ExportArgs(BaseModel):
         "поступления (партии) с ценами и курсами; recipe_costs — нормы на 1 свечу и текущая "
         "себестоимость материалов; jobs — задания и их себестоимость"
     )
-    date_from: date | None = Field(
+    date_from: ToolDate | None = Field(
         None, description="Начало периода, ГГГГ-ММ-ДД (по умолчанию — 91 день назад)"
     )
-    date_to: date | None = Field(
+    date_to: ToolDate | None = Field(
         None, description="Конец периода, ГГГГ-ММ-ДД (по умолчанию — сегодня)"
     )
     material: Annotated[str, Field(max_length=100)] | None = Field(
@@ -361,7 +374,7 @@ class CreateJobArgs(BaseModel):
         description="Название рецепта/изделия, например «Лаванда»"
     )
     quantity: Annotated[int, Field(gt=0, le=100_000)] = Field(description="Сколько штук")
-    planned_on: date = Field(description="Дата задания, ГГГГ-ММ-ДД (не в прошлом)")
+    planned_on: ToolDate = Field(description="Дата задания, ГГГГ-ММ-ДД (не в прошлом)")
     comment: Annotated[str, Field(max_length=500)] | None = Field(None, description="Комментарий")
 
 

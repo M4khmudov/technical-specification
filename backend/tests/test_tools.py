@@ -397,6 +397,41 @@ async def test_period_validation(session, shop):
     assert not outcome.ok
 
 
+async def test_tool_works_after_previous_tool_error(session, shop):
+    """B4: модель ошиблась (дата в прошлом) и исправилась в том же ответе."""
+    technologist, *_ = shop
+    ctx = await context(session, technologist)
+    await session.commit()  # как в чате: данные уже в базе, откатывается только ошибка
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    failed = await call(ctx, "create_job", recipe="Лаванда тест", quantity=5, planned_on=yesterday)
+    assert not failed.ok and "прошлом" in failed.output["error"]
+    retried = await call(
+        ctx, "create_job", recipe="Лаванда тест", quantity=5, planned_on=IN_WEEK.isoformat()
+    )
+    assert retried.ok, retried.output
+    unknown = await call(ctx, "get_job_cost", job_number=999999)
+    assert not unknown.ok
+    ctx.user_text = "Запомни: считай в евро"
+    remembered = await call(ctx, "remember_fact", fact="считать в евро")
+    assert remembered.ok, remembered.output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"date_from": "9999-12-30"},
+        {"date_to": "0001-01-01"},
+        {"date_from": "9999-12-25", "date_to": "9999-12-31"},
+    ],
+)
+async def test_extreme_dates_are_a_tool_error_not_a_crash(session, shop, arguments):
+    ctx = await context(session, shop[0])
+    for tool in ("get_deficit", "list_jobs"):
+        outcome = await call(ctx, tool, **arguments)
+        assert not outcome.ok
+        assert "дата" in outcome.output["error"].lower()
+
+
 def test_open_period_bounds():
     from app.assistant.tool_set import Period
 
