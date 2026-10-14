@@ -380,9 +380,9 @@ async def test_job_cost_total_is_the_sum_of_its_lines(session):
     from app.services import analytics
 
     shop = await make_shop(session)
-    await batch(session, shop.wax, "0.1", day=1, price="0.025")  # 0,1 × 0,025 = 0,0025
-    await batch(session, shop.wax, "0.1", day=2, price="0.025")
-    await batch(session, shop.wick, "100", day=1, price="0.005")
+    await batch(session, shop.wax, "0.1", day=1, price="0.04")  # 0,1 × 0,04 = 0,004 → 0,00
+    await batch(session, shop.wax, "0.1", day=2, price="0.04")
+    await batch(session, shop.wick, "100", day=1, price="0.004")  # сумма без округления 0,012
     job = await service.create_job(session, shop.user, job_in(shop, 1), plan=True)
     report = await analytics.job_cost_breakdown(session, job.number)
     assert report.job.cost_rub == sum((line.amount for line in report.lines), D("0"))
