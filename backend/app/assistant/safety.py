@@ -126,10 +126,14 @@ _MONTHS = "января|февраля|марта|апреля|мая|июня|�
 _DATE_WORDS = re.compile(rf"\b\d{{1,2}}\s+(?:{_MONTHS})\b", re.IGNORECASE)
 
 
+_LINKS = re.compile(r"\]\([^)\s]*\)|https?://\S+|/api/\S+")
+
+
 def _significant(text: str) -> list[Decimal]:
     """Числа, которые стоит проверять: без дат (и «12 августа»), годов, номеров и мелких
     счётных (≤ 10)."""
-    cleaned = _DATE.sub(" ", text)
+    cleaned = _LINKS.sub(" ", text)  # «/api/chat/files/48» — адрес, а не число
+    cleaned = _DATE.sub(" ", cleaned)
     cleaned = _DATE_WORDS.sub(" ", cleaned)
     cleaned = re.sub(r"№\s*\d+", " ", cleaned)  # номера заданий и партий
     return [
