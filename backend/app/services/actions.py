@@ -104,6 +104,7 @@ async def _locked(session: AsyncSession, user: User, action_id: int) -> Assistan
         select(AssistantAction)
         .where(AssistantAction.id == action_id, AssistantAction.user_id == user.id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if action is None:  # чужое предложение неотличимо от несуществующего
         raise NotFoundError("Действие не найдено")
@@ -118,12 +119,21 @@ async def _locked(session: AsyncSession, user: User, action_id: int) -> Assistan
 
 
 async def confirm(session: AsyncSession, user: User, action_id: int) -> AssistantAction:
-    """Пользователь нажал «Подтвердить»: выполняем тем же сервисом, что и кнопка."""
+    """Пользователь нажал «Подтвердить»: выполняем тем же сервисом, что и кнопка.
+
+    Предложение сначала «занимается» (статус меняется под блокировкой строки и сразу
+    коммитится), и только потом выполняется. Сервис задания коммитит сам, поэтому
+    держать блокировку предложения до конца нельзя: параллельный «Подтвердить» или
+    «Отменить» дождался бы её снятия, увидел бы «ждёт подтверждения» и выполнил
+    действие второй раз. Теперь он увидит, что действие уже обработано, — 409."""
     action = await _locked(session, user, action_id)
     if action.kind != CREATE_JOB:
         raise DomainError("Неизвестный тип действия")
     data = JobCreateIn.model_validate(action.payload)
     action_id = action.id
+    action.status = ActionStatus.CONFIRMED
+    action.decided_at = _now()
+    await session.commit()
     try:
         job = await production.create_job(session, user, data, plan=True)
     except DomainError as exc:
@@ -131,12 +141,9 @@ async def confirm(session: AsyncSession, user: User, action_id: int) -> Assistan
         failed = await session.get(AssistantAction, action_id, with_for_update=True)
         failed.status = ActionStatus.FAILED
         failed.error = exc.message
-        failed.decided_at = _now()
         await session.commit()
         raise
     done = await session.get(AssistantAction, action_id, with_for_update=True)
-    done.status = ActionStatus.CONFIRMED
-    done.decided_at = _now()
     done.result = {
         "job_id": job.id,
         "job_number": job.number,

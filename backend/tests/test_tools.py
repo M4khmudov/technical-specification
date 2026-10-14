@@ -1,6 +1,7 @@
 """Инструменты ассистента: чтение через сервисный слой, действие только после
 подтверждения, права пользователя, валидация аргументов модели."""
 
+import asyncio
 import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -239,6 +240,63 @@ async def test_double_confirm_creates_one_job(session, shop):
     with pytest.raises(ConflictError):
         await actions.confirm(session, technologist, outcome.extra["action"]["id"])
     assert await job_count(session) == before + 1
+
+
+async def _committed_proposal(session_factory) -> tuple:
+    """Предложение, закоммиченное по-настоящему: для гонок нужны независимые соединения."""
+    from uuid import uuid4
+
+    async with session_factory() as s:
+        tag = uuid4().hex[:6]
+        user = await make_user(s, login=f"confirm-{tag}", role=Role.TECHNOLOGIST)
+        wax = await make_material(s, code=f"CONF-{tag}", name=f"Воск {tag}")
+        recipe = await make_recipe(s, {wax: "1"}, name=f"Подтверждение {tag}")
+        await make_batch(s, wax, "100", received_on=date(2026, 9, 1))
+        ctx = await context(s, user)
+        await s.commit()
+        action = await actions.propose_create_job(
+            s, user, ctx.conversation_id, ctx.message_id, recipe.name, 3, IN_WEEK, None
+        )
+        return user, recipe, action.id
+
+
+async def _jobs_of(session_factory, recipe) -> int:
+    async with session_factory() as s:
+        return await s.scalar(
+            select(func.count()).select_from(ProductionJob).where(ProductionJob.recipe_id == recipe.id)
+        )
+
+
+async def _attempt(session_factory, operation, user, action_id):
+    async with session_factory() as s:
+        try:
+            return (await operation(s, user, action_id)).status
+        except ConflictError:
+            return "conflict"
+
+
+async def test_concurrent_confirms_create_one_job(session_factory):
+    """B1: три одновременных «Подтвердить» — одно задание, остальные получают 409."""
+    user, recipe, action_id = await _committed_proposal(session_factory)
+    results = await asyncio.gather(
+        *(_attempt(session_factory, actions.confirm, user, action_id) for _ in range(3))
+    )
+    assert sorted(map(str, results)) == ["confirmed", "conflict", "conflict"]
+    assert await _jobs_of(session_factory, recipe) == 1
+
+
+async def test_confirm_and_reject_race_has_one_outcome(session_factory):
+    """B1: «Отменить» одновременно с «Подтвердить» — либо задание создано, либо отказ."""
+    user, recipe, action_id = await _committed_proposal(session_factory)
+    results = await asyncio.gather(
+        _attempt(session_factory, actions.confirm, user, action_id),
+        _attempt(session_factory, actions.reject, user, action_id),
+    )
+    assert "conflict" in results
+    jobs = await _jobs_of(session_factory, recipe)
+    async with session_factory() as s:
+        final = (await s.get(AssistantAction, action_id)).status
+    assert (final, jobs) in [(ActionStatus.CONFIRMED, 1), (ActionStatus.REJECTED, 0)]
 
 
 async def test_other_user_cannot_confirm(session, shop):
