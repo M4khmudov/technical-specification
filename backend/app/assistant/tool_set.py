@@ -14,9 +14,10 @@ from pydantic import AfterValidator, BaseModel, Field, model_validator
 from app.assistant.safety import fact_is_from_user, untrusted
 from app.assistant.tools import Tool, ToolContext, ToolOutcome
 from app.core.format import fmt_money, fmt_qty
-from app.models.enums import ACTION_STATUS_LABELS, JobStatus
+from app.models.enums import ACTION_STATUS_LABELS, Currency, JobStatus
 from app.services import actions, analytics, batches, exports, memory, production
 from app.services.exports import Dataset
+from app.services.rates import get_rates_provider
 
 MaterialQuery = Annotated[str, Field(min_length=2, max_length=100)]
 Number = Annotated[int, Field(gt=0, lt=10_000_000)]
@@ -106,6 +107,77 @@ async def get_material_stock(ctx: ToolContext, args: StockArgs) -> ToolOutcome:
         },
         "; ".join(f"{r.material.name}: свободно {fmt_qty(r.free, r.material.unit)}" for r in rows),
     )
+
+
+# ---------------------------------------------------------------- цена материала
+
+
+class PriceArgs(StockArgs):
+    currency: Currency = Field(
+        Currency.RUB,
+        description="Валюта ответа: RUB, USD или EUR. Пересчёт по курсу ЦБ на сегодня",
+    )
+
+
+async def get_material_price(ctx: ToolContext, args: PriceArgs) -> ToolOutcome:
+    materials = await analytics.find_materials(ctx.session, args.material)
+    if not materials:
+        return ToolOutcome(
+            {"found": False, "message": f"Материал «{args.material}» не найден"},
+            f"Материал «{args.material}» не найден",
+        )
+    rows = await analytics.material_prices(ctx.session, materials)
+    quote = None
+    if args.currency != Currency.RUB:
+        quote = await (ctx.rates or get_rates_provider()).get_rate(args.currency, date.today())
+
+    def convert(rub: Decimal | None) -> str | None:
+        if rub is None:
+            return None
+        return str((rub / quote.rate).quantize(Decimal("0.01")) if quote else rub)
+
+    output = {
+        "found": True,
+        "explanation": "average_cost — средняя себестоимость единицы на складе (принятые "
+        "партии с остатком, взвешенно по остатку), в рублях по курсу на дату поступления. "
+        "last_receipts — цены последних поступлений в валюте поставки и в рублях.",
+        "currency": args.currency.value,
+        "materials": [
+            {
+                "code": r.material.code,
+                "name": r.material.name,
+                "unit": r.material.unit,
+                "average_cost_rub": str(r.average_cost_rub) if r.average_cost_rub else None,
+                "average_cost": convert(r.average_cost_rub),
+                "stock_qty": str(r.stock_qty),
+                "last_receipts": [
+                    {
+                        "batch_number": b.number,
+                        "received_on": b.received_on.isoformat(),
+                        "status": b.status.value,
+                        "price": str(b.price),
+                        "price_currency": b.currency.value,
+                        "unit_cost_rub": str(b.unit_cost_rub),
+                    }
+                    for b in r.last_receipts
+                ],
+            }
+            for r in rows
+        ],
+    }
+    if quote:
+        output["rate"] = {
+            "currency": quote.currency.value,
+            "rub_per_unit": str(quote.rate),
+            "date": quote.rate_date.isoformat(),
+        }
+    summary = "; ".join(
+        f"{r.material.name}: {fmt_money(r.average_cost_rub)} за {r.material.unit}"
+        if r.average_cost_rub
+        else f"{r.material.name}: нет остатка"
+        for r in rows
+    )
+    return ToolOutcome(output, summary)
 
 
 # ---------------------------------------------------------------- дефицит за период
@@ -423,6 +495,14 @@ TOOLS = [
         "зарезервировать) и количество «На проверке». Ищет по коду или названию.",
         StockArgs,
         get_material_stock,
+    ),
+    Tool(
+        "get_material_price",
+        "Сколько стоит материал: средняя себестоимость единицы на складе и цены последних "
+        "поступлений (в валюте поставки и в рублях). Может пересчитать в USD или EUR по курсу "
+        "ЦБ на сегодня. Ищет по коду или названию.",
+        PriceArgs,
+        get_material_price,
     ),
     Tool(
         "get_deficit",

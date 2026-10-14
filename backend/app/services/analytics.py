@@ -119,6 +119,48 @@ async def material_stock(session: AsyncSession, materials: list[Material]) -> li
     return result
 
 
+@dataclass
+class PriceRow:
+    material: Material
+    # Средняя себестоимость единицы свободного и зарезервированного остатка принятых
+    # партий (взвешенная по остатку); None — принятого остатка нет
+    average_cost_rub: Decimal | None
+    stock_qty: Decimal
+    last_receipts: list[Batch]  # последние поступления (без забракованных), новые первыми
+
+
+async def material_prices(
+    session: AsyncSession, materials: list[Material], last: int = 3
+) -> list[PriceRow]:
+    """Сколько стоит материал: средняя себестоимость остатка и цены последних поступлений.
+    Забракованные партии не учитываются — по ним материал не закупался в учёт."""
+    result = []
+    for m in materials:
+        accepted = and_(
+            Batch.material_id == m.id,
+            Batch.status == BatchStatus.ACCEPTED,
+            Batch.remaining_qty > 0,
+        )
+        qty, amount = (
+            await session.execute(
+                select(
+                    func.coalesce(func.sum(Batch.remaining_qty), 0),
+                    func.coalesce(func.sum(Batch.remaining_qty * Batch.unit_cost_rub), 0),
+                ).where(accepted)
+            )
+        ).one()
+        qty, amount = Decimal(qty), Decimal(amount)
+        average = (amount / qty).quantize(Decimal("0.01")) if qty > 0 else None
+        receipts = await session.scalars(
+            select(Batch)
+            .where(Batch.material_id == m.id, Batch.status != BatchStatus.REJECTED)
+            .order_by(Batch.received_on.desc(), Batch.id.desc())
+            .limit(last)
+        )
+        result.append(PriceRow(m, average, qty, list(receipts.all())))
+    return result
+
+
 async def free_stock(session: AsyncSession, material_ids: list[int]) -> dict[int, Decimal]:
     rows = await session.execute(
         select(Batch.material_id, func.sum(Batch.remaining_qty - Batch.reserved_qty))

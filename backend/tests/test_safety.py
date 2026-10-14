@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
-from app.assistant.safety import fact_is_from_user, ungrounded_numbers
+from app.assistant.safety import fact_is_from_user, promises_action, ungrounded_numbers
 from app.assistant.tools import default_registry
 from app.llm.fake import ScriptedProvider, text_reply, tool_call_reply
 from app.llm.registry import get_llm
@@ -32,6 +32,7 @@ def test_assistant_has_no_destructive_tools():
     names = {spec.name for spec in default_registry().specs()}
     assert names == {
         "get_material_stock",
+        "get_material_price",
         "get_deficit",
         "list_jobs",
         "get_batch_history",
@@ -206,6 +207,52 @@ async def test_honest_no_data_answer_is_not_flagged(api, model):
     model.push(*text_reply("Продажи в системе не учитываются — таких данных нет."))
     _, events = await ask(client, "Сколько свечей мы продали в сентябре?")
     assert events[-1][1]["notes"] == []
+
+
+# ---------------------------------------------------------------- обещания несуществующих действий
+
+
+async def test_promise_without_action_is_flagged(api, model):
+    """B5: «нажмите „Подтвердить“», а подготовленного действия нет — под ответом пометка."""
+    client, *_ = api
+    model.push(*text_reply("Подготовить отмену задания №27. Пожалуйста, нажмите «Подтвердить»."))
+    _, events = await ask(client, "Отмени задание №27")
+    done = events[-1][1]
+    assert any("подтверждать нечего" in n for n in done["notes"])
+
+
+async def test_real_proposal_is_not_flagged(api, model, session_factory):
+    client, material, _ = api
+    async with session_factory() as s:
+        recipe = Recipe(
+            name=f"Предложение {uuid4().hex[:5]}",
+            items=[RecipeItem(material_id=material.id, qty_per_unit=1)],
+        )
+        s.add(recipe)
+        await s.commit()
+    model.push(
+        *tool_call_reply(
+            "create_job",
+            json.dumps({"recipe": recipe.name, "quantity": 2, "planned_on": "2030-01-01"}),
+        )
+    )
+    model.push(*text_reply("Подготовил задание: 2 шт. Нажмите «Подтвердить»."))
+    _, events = await ask(client, "Запланируй 2 штуки")
+    assert events[-1][1]["notes"] == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "flagged"),
+    [
+        ("Нажмите «Подтвердить», и задание отменится", True),
+        ("Я подготовлю отмену, которую вы сможете подтвердить", True),
+        ("Я отменил все задания", True),
+        ("Задание №12 — статус «Отменено», его создал Сотрудник-1", False),
+        ("Отменить задание ассистент не может: это кнопка «Отменить» в карточке", False),
+    ],
+)
+def test_promises_action(answer, flagged):
+    assert promises_action(answer) is flagged
 
 
 # ---------------------------------------------------------------- функции защиты

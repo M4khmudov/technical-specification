@@ -28,7 +28,12 @@ from app.assistant.code_interpreter import (
     rewrite_sandbox_links,
 )
 from app.assistant.pii import Pseudonymizer, load_pseudonymizer, mask_items
-from app.assistant.safety import UNGROUNDED_NOTE, ungrounded_numbers
+from app.assistant.safety import (
+    FALSE_ACTION_NOTE,
+    UNGROUNDED_NOTE,
+    promises_action,
+    ungrounded_numbers,
+)
 from app.assistant.tools import ToolContext, ToolRegistry
 from app.core.errors import DomainError
 from app.db.session import SessionLocal
@@ -198,6 +203,14 @@ async def _finalize(session, turn: Turn, state: TurnState, ci: CodeInterpreterSe
     return files
 
 
+def check_actions(state: TurnState) -> None:
+    """Ответ говорит о подтверждении или выполненном действии, а предложения в этом ходе
+    нет — пользователь не должен искать кнопку, которой нет."""
+    proposed = any(t.get("action") for t in state.tools)
+    if not proposed and promises_action(state.content):
+        state.notes.append(FALSE_ACTION_NOTE)
+
+
 def check_grounding(state: TurnState, items: list[Item]) -> None:
     """Числа без обращения к данным: модель ничего не запросила (ни инструментов, ни кода),
     а в ответе есть значимые числа, которых нет ни в вопросе, ни в истории диалога."""
@@ -244,6 +257,7 @@ async def generate(
                 error = exc.user_message
             files = await _finalize(session, turn, state, ci)
             check_grounding(state, turn.items)
+            check_actions(state)
             for f in files:
                 await queue.put(ChatEvent("file", file_out(f)))
     except asyncio.CancelledError:

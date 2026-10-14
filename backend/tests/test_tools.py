@@ -432,6 +432,32 @@ async def test_extreme_dates_are_a_tool_error_not_a_crash(session, shop, argumen
         assert "дата" in outcome.output["error"].lower()
 
 
+async def test_material_price_ignores_rejected_and_converts(session, shop):
+    """«Сколько стоит воск»: средняя себестоимость остатка и последние поступления;
+    забракованная партия не учитывается; в евро — по курсу сервиса курсов."""
+    from tests.fakes import FakeRates
+
+    technologist, wax, *_ = shop
+    await make_batch(session, wax, "10", received_on=date(2026, 9, 3), price="600")
+    await make_batch(
+        session, wax, "10", received_on=date(2026, 9, 4), price="9999", status=BatchStatus.REJECTED
+    )
+    ctx = await context(session, technologist)
+    outcome = await call(ctx, "get_material_price", material=wax.code)
+    assert outcome.ok, outcome.output
+    (row,) = outcome.output["materials"]
+    assert (
+        row["average_cost_rub"] == "500.00"
+    )  # (10×400 + 10×600) / 20, без брака и без «На проверке»
+    assert "9999" not in json.dumps(row)
+    assert [r["status"] for r in row["last_receipts"]] == ["accepted", "pending", "accepted"]
+
+    ctx.rates = FakeRates()  # EUR = 100 ₽
+    euro = await call(ctx, "get_material_price", material=wax.code, currency="EUR")
+    assert euro.output["materials"][0]["average_cost"] == "5.00"
+    assert euro.output["rate"]["rub_per_unit"] == "100"
+
+
 def test_open_period_bounds():
     from app.assistant.tool_set import Period
 
