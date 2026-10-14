@@ -10,6 +10,7 @@
 """
 
 import codecs
+import csv
 import io
 import logging
 import mimetypes
@@ -109,6 +110,20 @@ def _strict(data: bytes, encoding: str) -> str:
     if "\x00" in text:
         raise DomainError("Не удалось прочитать CSV: неизвестная кодировка")
     return text
+
+
+def describe_upload(filename: str, data: bytes) -> str:
+    """Подсказка модели о формате файла: в контейнер CSV уходит в UTF-8, а разделитель
+    бывает «;» (русский Excel) — без подсказки модель читала всё в одну колонку."""
+    if PurePosixPath(filename).suffix.lower() != ".csv":
+        return "Excel"
+    try:
+        sample = _decode(data)[:4096]
+        delimiter = csv.Sniffer().sniff(sample, delimiters=";,\t|").delimiter
+    except (DomainError, csv.Error):
+        return "CSV, UTF-8"
+    shown = "табуляция" if delimiter == "\t" else delimiter
+    return f"CSV, UTF-8, разделитель «{shown}»"
 
 
 def mask_file(filename: str, data: bytes, pii: Pseudonymizer | None) -> bytes:

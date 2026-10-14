@@ -352,7 +352,7 @@ async def test_uploaded_excel_is_analysed_with_pseudonyms(api, provider, session
 
     request = provider.requests[0][1]
     assert request.items[-1].text.endswith(
-        "[Файлы пользователя доступны в Code Interpreter: /mnt/data/file-1-продажи.xlsx]"
+        "[Файлы пользователя доступны в Code Interpreter: /mnt/data/file-1-продажи.xlsx (Excel)]"
     )
     sent = load_workbook(io.BytesIO(provider.uploaded[request.code_interpreter.file_ids[0]][1]))
     values = [c.value for c in sent.active[2]]
@@ -414,3 +414,16 @@ def test_links_to_files_with_spaces_and_brackets_are_rewritten():
     assert rewrite_sandbox_links(text, [chart], None) == (
         "[Скачать](/api/chat/files/7) и ![](/api/chat/files/7)"
     )
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ("Дата;Сумма\n2026-09-01;10\n2026-09-02;20\n".encode("cp1251"), "разделитель «;»"),
+        (b"date,sum\n2026-09-01,10\n2026-09-02,20\n", "разделитель «,»"),
+    ],
+)
+def test_csv_delimiter_is_told_to_the_model(data, expected):
+    from app.assistant.code_interpreter import describe_upload
+
+    assert expected in describe_upload("закупки.csv", data)

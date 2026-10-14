@@ -25,6 +25,7 @@ from app.assistant.agent import ChatEvent, TurnState, run_turn
 from app.assistant.code_interpreter import (
     CodeInterpreterSession,
     collect_generated,
+    describe_upload,
     rewrite_sandbox_links,
 )
 from app.assistant.pii import Pseudonymizer, load_pseudonymizer, mask_items
@@ -172,7 +173,8 @@ async def _attach_uploads(session, turn: Turn, ci: CodeInterpreterSession, items
     paths = []
     for upload in reversed(uploads):
         try:
-            paths.append(await ci.add(upload.filename, upload.data))
+            path = await ci.add(upload.filename, upload.data)
+            paths.append(f"{path} ({describe_upload(upload.filename, upload.data)})")
         except (LLMError, DomainError) as exc:
             logger.warning("upload to code interpreter failed: %s", type(exc).__name__)
             paths.append(f"{ci.pii.mask(upload.filename)} (не удалось передать)")
