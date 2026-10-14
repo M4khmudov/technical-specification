@@ -30,3 +30,7 @@ class ConflictError(DomainError):
 
 class ExternalServiceError(DomainError):
     status_code = 503
+
+
+class TooManyRequestsError(DomainError):
+    status_code = 429

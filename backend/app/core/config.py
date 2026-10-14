@@ -1,7 +1,16 @@
+import logging
+import secrets
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# Примеры секретов из репозитория (.env.example, прежние значения по умолчанию)
+KNOWN_EXAMPLE_SECRETS = {
+    "change-me-to-a-long-random-string-of-32-plus-chars",
+}
 
 
 class Settings(BaseSettings):
@@ -46,7 +55,19 @@ class Settings(BaseSettings):
     # Ожидание события, пока Code Interpreter выполняет код (он может молчать дольше)
     llm_code_timeout_seconds: float = Field(default=90.0, gt=0)
 
-    jwt_secret: SecretStr = SecretStr("change-me-to-a-long-random-string-of-32-plus-chars")
+    # Секрет подписи токенов. Не задан или оставлен пример из репозитория — генерируется
+    # случайный при запуске (токены сбрасываются при перезапуске): секрет, опубликованный
+    # в репозитории, позволял бы подделать токен руководителя
+    jwt_secret: SecretStr | None = Field(default=None, validate_default=True)
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _real_secret(cls, value: SecretStr | None) -> SecretStr:
+        raw = value.get_secret_value() if value else ""
+        if len(raw) < 32 or raw in KNOWN_EXAMPLE_SECRETS:
+            logger.warning("JWT_SECRET не задан или взят из примера — сгенерирован случайный")
+            return SecretStr(secrets.token_hex(32))
+        return value
 
 
 @lru_cache

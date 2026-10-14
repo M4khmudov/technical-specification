@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, SessionDep, UnauthorizedError
 from app.core.permissions import ROLE_PERMISSIONS, Permission
 from app.core.security import create_access_token, verify_password
+from app.core.throttle import login_throttle
 from app.models import User
 from app.models.enums import ROLE_LABELS, Role
 
@@ -44,9 +45,12 @@ def user_out(user: User) -> UserOut:
 
 @router.post("/login")
 async def login(data: LoginIn, session: SessionDep) -> TokenOut:
+    login_throttle.check(data.login)  # подбор пароля: не больше 5 ошибок за 5 минут
     user = await session.scalar(select(User).where(User.login == data.login))
     if user is None or not user.is_active or not verify_password(data.password, user.password_hash):
+        login_throttle.failed(data.login)
         raise UnauthorizedError("Неверный логин или пароль")
+    login_throttle.succeeded(data.login)
     return TokenOut(access_token=create_access_token(user.id), user=user_out(user))
 
 
