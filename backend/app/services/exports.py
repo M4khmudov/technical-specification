@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import clock
@@ -30,13 +30,20 @@ from app.models import (
 from app.models.enums import (
     BATCH_STATUS_LABELS,
     JOB_STATUS_LABELS,
-    BatchStatus,
     JobStatus,
     MovementKind,
 )
-from app.services import analytics
+from app.services import analytics, production
 
 MAX_ROWS = 20_000
+MAX_JOBS = 2000
+
+
+def _cut(rows: list, limit: int) -> tuple[list, bool]:
+    """Не больше limit строк и признак, что выгрузка неполная (молча не обрезаем)."""
+    return rows[:limit], len(rows) > limit
+
+
 MAX_PERIOD_DAYS = 3 * 366
 
 
@@ -53,6 +60,7 @@ class Table:
     columns: list[str]
     rows: list[list[object]]
     description: str
+    truncated: bool = False  # строк больше предела — выгружена только часть
 
     def to_csv(self) -> str:
         buffer = io.StringIO()
@@ -116,7 +124,7 @@ async def consumption(
         .join(Recipe, Recipe.id == ProductionJob.recipe_id)
         .where(BatchMovement.kind == MovementKind.CONSUME, day.between(date_from, date_to))
         .order_by(day, Material.code)
-        .limit(MAX_ROWS)
+        .limit(MAX_ROWS + 1)
     )
     if ids is not None:
         stmt = stmt.where(Material.id.in_(ids))
@@ -124,6 +132,7 @@ async def consumption(
         [d, _week(d), code, name, unit, qty, cost, (qty * cost).quantize(Decimal("0.01")), job, r]
         for d, code, name, unit, qty, cost, job, r in await session.execute(stmt)
     ]
+    rows, truncated = _cut(rows, MAX_ROWS)
     return Table(
         f"consumption_{date_from}_{date_to}.csv",
         [
@@ -140,7 +149,10 @@ async def consumption(
         ],
         rows,
         "Списание материалов в производство по партиям: дата, неделя (понедельник), материал, "
-        "количество, себестоимость единицы и сумма в рублях, задание и изделие.",
+        "количество, себестоимость единицы и сумма в рублях, задание и изделие. Дней и недель "
+        "без списаний в выгрузке нет: для графика по периодам строй полный ряд периодов "
+        f"с {date_from} по {date_to} и заполняй пропуски нулями.",
+        truncated,
     )
 
 
@@ -156,7 +168,7 @@ async def receipts(
         .join(Supplier, Supplier.id == Receipt.supplier_id)
         .where(Batch.received_on.between(date_from, date_to))
         .order_by(Batch.received_on, Batch.number)
-        .limit(MAX_ROWS)
+        .limit(MAX_ROWS + 1)
     )
     if ids is not None:
         stmt = stmt.where(Material.id.in_(ids))
@@ -177,6 +189,7 @@ async def receipts(
         ]
         for b, m, supplier in await session.execute(stmt)
     ]
+    rows, truncated = _cut(rows, MAX_ROWS)
     return Table(
         f"receipts_{date_from}_{date_to}.csv",
         [
@@ -196,28 +209,17 @@ async def receipts(
         rows,
         "Поступления: каждая строка — партия с ценой в валюте, курсом и себестоимостью "
         "единицы в рублях.",
+        truncated,
     )
 
 
 async def recipe_costs(session: AsyncSession) -> Table:
     """Нормы рецептов и текущая себестоимость материалов: средняя по свободному остатку
     принятых партий, а если его нет — по последнему поступлению."""
-    accepted = and_(Batch.status == BatchStatus.ACCEPTED, Batch.remaining_qty > 0)
-    avg_rows = await session.execute(
-        select(
-            Batch.material_id,
-            func.sum(Batch.remaining_qty * Batch.unit_cost_rub) / func.sum(Batch.remaining_qty),
-        )
-        .where(accepted)
-        .group_by(Batch.material_id)
-    )
-    average = {mid: Decimal(v) for mid, v in avg_rows}
-    last_rows = await session.execute(
-        select(Batch.material_id, Batch.unit_cost_rub)
-        .distinct(Batch.material_id)
-        .order_by(Batch.material_id, Batch.received_on.desc(), Batch.id.desc())
-    )
-    last = {mid: v for mid, v in last_rows}
+    material_ids = list((await session.scalars(select(RecipeItem.material_id).distinct())).all())
+    # Та же цена, что у оценки себестоимости черновика: средняя по остатку принятых
+    # партий, иначе последнее поступление — но не брак (раньше брался и он)
+    prices = await production.stock_unit_costs(session, material_ids)
 
     rows = []
     stmt = (
@@ -227,7 +229,7 @@ async def recipe_costs(session: AsyncSession) -> Table:
         .order_by(Recipe.name, Material.code)
     )
     for recipe, m, norm in await session.execute(stmt):
-        unit_cost = average.get(m.id, last.get(m.id))
+        unit_cost = prices.get(m.id)
         unit_cost = unit_cost.quantize(Decimal("0.000001")) if unit_cost is not None else None
         cost = (norm * unit_cost).quantize(Decimal("0.0001")) if unit_cost is not None else None
         rows.append([recipe, m.code, m.name, m.unit, norm, unit_cost, cost])
@@ -243,14 +245,14 @@ async def recipe_costs(session: AsyncSession) -> Table:
             "cost_per_candle_rub",
         ],
         rows,
-        "Нормы материалов на 1 свечу по рецептам и текущая себестоимость единицы материала "
-        "(средняя по свободному остатку, иначе — по последнему поступлению). Себестоимость "
-        "свечи = сумма cost_per_candle_rub по изделию.",
+        "Нормы материалов на 1 свечу по рецептам и текущая себестоимость единицы материала: "
+        "средняя по остатку принятых партий (взвешенно по остатку, включая зарезервированное), "
+        "а если остатка нет — по последнему поступлению, кроме брака. Себестоимость свечи = "
+        "сумма cost_per_candle_rub по изделию.",
     )
 
 
 async def jobs(session: AsyncSession, date_from: date | None, date_to: date | None) -> Table:
-    from app.services import production
 
     date_from, date_to = _period(date_from, date_to)
     ids = (
@@ -261,9 +263,10 @@ async def jobs(session: AsyncSession, date_from: date | None, date_to: date | No
                 ProductionJob.status != JobStatus.CANCELLED,
             )
             .order_by(ProductionJob.planned_on, ProductionJob.number)
-            .limit(2000)
+            .limit(MAX_JOBS + 1)
         )
     ).all()
+    ids, truncated = _cut(list(ids), MAX_JOBS)
     rows = []
     for job_id in ids:
         j = await production.get_job(session, job_id)
@@ -294,6 +297,7 @@ async def jobs(session: AsyncSession, date_from: date | None, date_to: date | No
         rows,
         "Производственные задания за период со статусом и себестоимостью (факт — по "
         "списанию, оценка — по резерву).",
+        truncated,
     )
 
 

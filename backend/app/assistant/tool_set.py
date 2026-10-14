@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from app.assistant.safety import memory_problem, untrusted
 from app.assistant.tools import Tool, ToolContext, ToolOutcome
@@ -30,6 +30,14 @@ def this_week(today: date | None = None) -> tuple[date, date]:
     return monday, monday + timedelta(days=6)
 
 
+class ToolArgs(BaseModel):
+    """Аргументы инструмента. Лишние поля — ошибка, а не молчаливый пропуск: модель
+    передала «month: 2026-11» — пусть узнает, что такого параметра нет, и укажет
+    date_from/date_to, а не получит данные за текущую неделю."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 MIN_DATE, MAX_DATE = date(2000, 1, 1), date(2100, 12, 31)
 
 
@@ -43,7 +51,7 @@ def _in_range(value: date) -> date:
 ToolDate = Annotated[date, AfterValidator(_in_range)]
 
 
-class Period(BaseModel):
+class Period(ToolArgs):
     date_from: ToolDate | None = Field(
         None,
         description="Начало периода, ГГГГ-ММ-ДД. По умолчанию — понедельник текущей недели; "
@@ -73,7 +81,7 @@ class Period(BaseModel):
 # ---------------------------------------------------------------- остаток материала
 
 
-class StockArgs(BaseModel):
+class StockArgs(ToolArgs):
     material: MaterialQuery = Field(
         description="Код материала (WAX-SOY) или название в любой форме («соевый воск», «фитили»)"
     )
@@ -263,7 +271,7 @@ async def list_jobs(ctx: ToolContext, args: JobsArgs) -> ToolOutcome:
 # ---------------------------------------------------------------- история партии
 
 
-class BatchArgs(BaseModel):
+class BatchArgs(ToolArgs):
     batch_number: Number = Field(description="Номер партии (как в реестре: «партия №12» → 12)")
 
 
@@ -311,7 +319,7 @@ async def get_batch_history(ctx: ToolContext, args: BatchArgs) -> ToolOutcome:
 # ---------------------------------------------------------------- себестоимость задания
 
 
-class JobArgs(BaseModel):
+class JobArgs(ToolArgs):
     job_number: Number = Field(description="Номер задания («задание №27» → 27)")
 
 
@@ -361,7 +369,7 @@ async def get_job_cost(ctx: ToolContext, args: JobArgs) -> ToolOutcome:
 # ---------------------------------------------------------------- данные для Code Interpreter
 
 
-class ExportArgs(BaseModel):
+class ExportArgs(ToolArgs):
     dataset: Dataset = Field(
         description="consumption — списание материалов по дням и заданиям; receipts — "
         "поступления (партии) с ценами и курсами; recipe_costs — нормы на 1 свечу и текущая "
@@ -404,6 +412,12 @@ async def export_data(ctx: ToolContext, args: ExportArgs) -> ToolOutcome:
         "preview": [[str(v) for v in row] for row in table.rows[:5]],
         "note": "Файл появится в /mnt/data в Code Interpreter. Числа в CSV — с точкой.",
     }
+    if table.truncated:
+        output["truncated"] = True
+        output["note"] += (
+            f" Выгрузка неполная: только первые {len(table.rows)} строк — сузьте период или "
+            "выберите материал."
+        )
     if "material_code" in table.columns and "material_name" in table.columns:
         # Модель ищет «соевый воск», а в данных «Воск соевый» — фильтр по подстроке
         # названия промахивается. Даём точные коды.
@@ -419,7 +433,7 @@ async def export_data(ctx: ToolContext, args: ExportArgs) -> ToolOutcome:
 # ---------------------------------------------------------------- память
 
 
-class RememberArgs(BaseModel):
+class RememberArgs(ToolArgs):
     fact: Annotated[str, Field(min_length=3, max_length=300)] = Field(
         description="Короткий факт о пользователе своими словами, например "
         "«Считать стоимость в евро», «Мой цех — второй»"
@@ -455,7 +469,7 @@ async def remember_fact(ctx: ToolContext, args: RememberArgs) -> ToolOutcome:
 # ---------------------------------------------------------------- действие: создать задание
 
 
-class CreateJobArgs(BaseModel):
+class CreateJobArgs(ToolArgs):
     recipe: Annotated[str, Field(min_length=2, max_length=100)] = Field(
         description="Название рецепта/изделия, например «Лаванда»"
     )

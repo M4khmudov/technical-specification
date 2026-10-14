@@ -87,8 +87,12 @@ class ToolRegistry:
         try:
             args = tool.args.model_validate(raw)
         except ValidationError as exc:
+            allowed = ", ".join(tool.args.model_fields)
             problems = "; ".join(
-                f"{'.'.join(str(p) for p in e['loc']) or 'аргументы'}: {e['msg']}"
+                f"лишний аргумент «{'.'.join(str(p) for p in e['loc'])}» — такого нет "
+                f"(есть: {allowed})"
+                if e["type"] == "extra_forbidden"
+                else f"{'.'.join(str(p) for p in e['loc']) or 'аргументы'}: {e['msg']}"
                 for e in exc.errors()
             )
             return _error(f"Некорректные аргументы: {problems}"), raw

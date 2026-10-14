@@ -480,3 +480,34 @@ def test_numbers_for_the_model_have_no_trailing_zeros():
         "rows": [["203.441", "0"]],
         "date": "2026-10-16",
     }
+
+
+async def test_unknown_tool_argument_is_an_error_not_ignored(session, shop):
+    """M5: «за ноябрь» как month=2026-11 — ошибка с подсказкой, а не данные за эту неделю."""
+    ctx = await context(session, shop[0])
+    outcome = await call(ctx, "list_jobs", month="2026-11")
+    assert not outcome.ok
+    assert "лишний аргумент «month»" in outcome.output["error"]
+    assert "date_from" in outcome.output["error"]
+
+
+async def test_recipe_costs_ignore_rejected_batches(session):
+    """M5: нет принятого остатка — цена последнего поступления, но не брака."""
+    from app.services import exports
+
+    material = await make_material(session, code="M5-WAX", name="Воск M5")
+    await make_recipe(session, {material: "1"}, name="Рецепт M5")
+    used_up = await make_batch(session, material, "1", received_on=date(2026, 9, 1), price="300")
+    used_up.remaining_qty = D("0")  # израсходована: принятого остатка нет
+    await session.flush()
+    await make_batch(
+        session,
+        material,
+        "5",
+        received_on=date(2026, 9, 2),
+        price="9999",
+        status=BatchStatus.REJECTED,
+    )
+    table = await exports.recipe_costs(session)
+    (row,) = [r for r in table.rows if r[1] == "M5-WAX"]
+    assert row[5] == D("300")
