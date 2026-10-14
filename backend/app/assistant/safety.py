@@ -48,11 +48,13 @@ _STOP = {
 }
 
 
-def untrusted(text: str | None) -> dict | None:
-    """Обёртка свободного текста из данных для результата инструмента."""
+def untrusted(field: str, text: str | None) -> dict[str, str | None]:
+    """Свободный текст из данных для результата инструмента: сам текст — обычной строкой
+    (во вложенном виде модель принимала его за служебную пометку и отвечала «комментария
+    нет»), рядом — пометка, что это данные, а не инструкция."""
     if not text:
-        return None
-    return {"text": text, "warning": DATA_NOTE}
+        return {field: None}
+    return {field: text, f"{field}_is_data": DATA_NOTE}
 
 
 # ---------------------------------------------------------------- память

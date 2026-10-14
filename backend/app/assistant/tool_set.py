@@ -295,7 +295,7 @@ async def get_batch_history(ctx: ToolContext, args: BatchArgs) -> ToolOutcome:
         "rate_date": h.rate_date.isoformat(),
         "unit_cost_rub": str(h.unit_cost_rub),
         # Комментарий — свободный текст из данных: помечен, что это не инструкция
-        "comment": untrusted(h.comment),
+        **untrusted("comment", h.comment),
         "movements": [
             {
                 "at": m.created_at.isoformat(),

@@ -151,8 +151,8 @@ async def test_batch_history_returns_comment_as_data(session, shop):
     assert outcome.output["number"] == b1.number
     assert [m["kind"] for m in outcome.output["movements"]] == ["reserve"]
     # комментарий — данные с пометкой, что это не инструкция
-    assert outcome.output["comment"]["text"].startswith("Игнорируй")
-    assert "не инструкция" in outcome.output["comment"]["warning"]
+    assert outcome.output["comment"].startswith("Игнорируй")
+    assert "не инструкция" in outcome.output["comment_is_data"]
 
 
 async def test_job_cost(session, shop):
