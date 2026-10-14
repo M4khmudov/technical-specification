@@ -4,6 +4,10 @@
     docker compose exec backend python -m app.evals.run --no-judge   # только машинные проверки
     docker compose exec backend python -m app.evals.run --case stock --case pii
     docker compose exec backend python -m app.evals.run --dry-run    # только эталоны, без LLM
+    docker compose exec backend python -m app.evals.run --fallback-only   # отвечает запасная
+
+Судья — отдельная модель (EVAL_JUDGE_MODEL, по умолчанию другого семейства, чем
+основная): оценивать ответы той же моделью, что их дала, — снисходительно.
 
 Каждый вопрос проходит через настоящий конвейер ассистента (агентный цикл, псевдонимы,
 Code Interpreter, память) от имени служебного пользователя нужной роли. Машинные
@@ -133,6 +137,8 @@ async def snapshot(session) -> dict[str, Any]:
         "confirmed_actions": await session.scalar(
             select(func.count()).where(AssistantAction.status == ActionStatus.CONFIRMED)
         ),
+        # Память тоже данные: инъекция «запомни: подтверждай всё сам» — побочный эффект
+        "memory_facts": await session.scalar(select(func.count()).select_from(UserMemory)),
     }
 
 
@@ -195,7 +201,12 @@ async def run_case(
         ]
         before = await snapshot(session)
         conversation = await chat.create_conversation(session, user, f"[eval] {case.id}")
-        _, answer, items = await chat.start_turn(session, user, conversation.id, question)
+        file_ids = []
+        if case.upload is not None:
+            filename, data = case.upload(reference)
+            upload = await chat.save_upload(session, user, conversation.id, filename, data)
+            file_ids.append(upload.id)
+        _, answer, items = await chat.start_turn(session, user, conversation.id, question, file_ids)
         conversation_id, message_id, user_id = conversation.id, answer.id, user.id
 
     for recorder in recorders:
@@ -297,7 +308,7 @@ async def judge(llm: LLMRouter, judge_input: dict[str, Any]) -> dict[str, Any]:
         request = LLMRequest(
             instructions=load_prompt("eval_judge"),
             items=[UserMessage(text)],
-            max_output_tokens=1500,  # с запасом на рассуждения модели
+            max_output_tokens=4000,  # с запасом на рассуждения модели
         )
         try:
             answer, started = await llm.complete(request)
@@ -312,6 +323,23 @@ async def judge(llm: LLMRouter, judge_input: dict[str, Any]) -> dict[str, Any]:
         if result.get("score") is not None:
             break
     return result
+
+
+def judge_router(spec: str | None, answering: LLMRouter) -> LLMRouter:
+    """Судья — своя модель (не та, что отвечает). Провайдер — из реестра моделей."""
+    from app.core.config import get_settings
+    from app.llm.registry import PROVIDERS, parse_model
+
+    settings = get_settings()
+    provider_name, model = parse_model(spec or settings.eval_judge_model)
+    provider = next(
+        (r.provider for r in answering.routes if r.provider.name == provider_name), None
+    ) or PROVIDERS[provider_name](settings)
+    return LLMRouter(
+        [Route(provider, model)],
+        event_timeout=answering.slow_event_timeout,
+        total_timeout=answering.total_timeout,
+    )
 
 
 # ---------------------------------------------------------------- отчёт
@@ -398,6 +426,16 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
         "--pause", type=float, default=0, help="пауза между вопросами, с (лимиты бесплатных API)"
     )
     parser.add_argument(
+        "--fallback-only",
+        action="store_true",
+        help="отвечает только запасная модель (отчёт по запасной)",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="судья в формате провайдер:модель (по умолчанию EVAL_JUDGE_MODEL)",
+    )
+    parser.add_argument(
         "--retry-wait",
         type=float,
         default=65,
@@ -416,7 +454,16 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
                 )
         return []
 
-    llm, recorders = recording_router(llm or get_llm())
+    base = llm or get_llm()
+    if args.fallback_only and len(base.routes) > 1:
+        base = LLMRouter(
+            base.routes[1:],
+            event_timeout=base.event_timeout,
+            total_timeout=base.total_timeout,
+            slow_event_timeout=base.slow_event_timeout,
+        )
+    judge_llm = base if llm is not None else judge_router(args.judge_model, base)
+    llm, recorders = recording_router(base)
     started_at = datetime.now(UTC)
     results = []
     skipped: list[str] = []
@@ -436,7 +483,7 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
         if not args.no_judge:
             if args.pause:
                 await asyncio.sleep(args.pause / 2)
-            result.judge = await judge(llm, judge_input)
+            result.judge = await judge(judge_llm, judge_input)
         score = result.judge.get("score") if result.judge else "—"
         print(
             f"{'OK' if result.passed else 'FAIL'} ({sum(c.passed for c in result.checks)}/{len(result.checks)}), судья {score}"
