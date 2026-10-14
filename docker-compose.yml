@@ -14,7 +14,7 @@ x-backend-env: &backend-env
   LLM_EVENT_TIMEOUT_SECONDS: ${LLM_EVENT_TIMEOUT_SECONDS:-30}
   LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
   LLM_CODE_TIMEOUT_SECONDS: ${LLM_CODE_TIMEOUT_SECONDS:-90}
-  EVAL_JUDGE_MODEL: ${EVAL_JUDGE_MODEL:-openai:gpt-5.4-mini}
+  EVAL_JUDGE_MODEL: ${EVAL_JUDGE_MODEL:-openai:gpt-5.4}
   SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
   # Не задан — бэкенд сгенерирует случайный при запуске
   JWT_SECRET: ${JWT_SECRET:-}

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     llm_event_timeout_seconds: float = Field(default=30.0, gt=0)
     llm_timeout_seconds: float = Field(default=120.0, gt=0)
     # LLM-судья эталонов — другая модель, чем отвечающая (по умолчанию другое семейство)
-    eval_judge_model: str = "openai:gpt-5.4-mini"
+    eval_judge_model: str = "openai:gpt-5.4"
     # Ожидание события, пока Code Interpreter выполняет код (он может молчать дольше)
     llm_code_timeout_seconds: float = Field(default=90.0, gt=0)
 
