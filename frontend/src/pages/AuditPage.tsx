@@ -6,7 +6,7 @@ import { ErrorBanner, Field, inputClass, Pagination } from '../components/ui'
 import { AUDIT_ACTION, fmtDateTime } from '../format'
 import { useApi } from '../useApi'
 
-const ENTITY: Record<string, string> = { batch: 'Партия', job: 'Задание', marking_report: 'Отчёт маркировки' }
+const ENTITY: Record<string, string> = { batch: 'Партия', job: 'Задание', marking_report: 'Отчёт маркировки', memory: 'Память ассистента' }
 
 export default function AuditPage() {
   const [params, setParams] = useSearchParams()

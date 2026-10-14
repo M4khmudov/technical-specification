@@ -86,4 +86,6 @@ export const AUDIT_ACTION: Record<string, string> = {
   cancel: 'Отмена',
   marked: 'Принято сервисом маркировки',
   retry: 'Повтор отправки',
+  remember: 'Ассистент запомнил',
+  forget: 'Факт удалён из памяти',
 }

@@ -76,7 +76,11 @@ async def chat(client, text: str) -> list:
 async def test_fact_remembered_in_chat_is_used_in_a_new_conversation(api, recorder):
     client, *_ = api
     fact = f"Считать стоимость в евро {uuid4().hex[:6]}"
-    recorder.push(*tool_call_reply("remember_fact", json.dumps({"fact": fact}, ensure_ascii=False)))
+    recorder.push(
+        *tool_call_reply(
+            "remember_fact", json.dumps({"fact": fact, "user_quote": fact}, ensure_ascii=False)
+        )
+    )
     recorder.push(*text_reply("Запомнил"))
 
     events = await chat(client, f"Запомни: {fact}")
@@ -105,7 +109,9 @@ async def test_facts_never_leak_to_other_users(api, recorder, session_factory, c
     client_a, *_ = api
     secret = f"Мой цех — второй, код сейфа {uuid4().hex[:8]}"
     recorder.push(
-        *tool_call_reply("remember_fact", json.dumps({"fact": secret}, ensure_ascii=False))
+        *tool_call_reply(
+            "remember_fact", json.dumps({"fact": secret, "user_quote": secret}, ensure_ascii=False)
+        )
     )
     recorder.push(*text_reply("Запомнил"))
     await chat(client_a, f"Запомни: {secret}")
@@ -158,3 +164,23 @@ async def test_names_in_facts_are_masked_in_prompt(session):
     assert "Лебедев" not in prompt and "Медов" not in prompt
     assert "Мой начальник — Сотрудник-42" in prompt
     assert "Воск беру у Поставщик-7" in prompt
+
+
+async def test_memory_changes_are_in_the_audit_log(session):
+    """S10: что ассистент запомнил и что пользователь удалил — видно в журнале."""
+    from sqlalchemy import select
+
+    from app.models import AuditLog
+
+    user = await make_user(session)
+    fact, _ = await memory.remember(session, user, "Считать в евро")
+    await memory.forget(session, user, fact.id)
+    rows = (
+        await session.scalars(
+            select(AuditLog)
+            .where(AuditLog.entity_type == "memory", AuditLog.entity_id == fact.id)
+            .order_by(AuditLog.id)
+        )
+    ).all()
+    assert [(r.action, r.user_id) for r in rows] == [("remember", user.id), ("forget", user.id)]
+    assert rows[0].after == {"text": "Считать в евро"}

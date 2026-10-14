@@ -413,7 +413,7 @@ async def test_tool_works_after_previous_tool_error(session, shop):
     unknown = await call(ctx, "get_job_cost", job_number=999999)
     assert not unknown.ok
     ctx.user_text = "Запомни: считай в евро"
-    remembered = await call(ctx, "remember_fact", fact="считать в евро")
+    remembered = await call(ctx, "remember_fact", fact="считать в евро", user_quote="считай в евро")
     assert remembered.ok, remembered.output
 
 

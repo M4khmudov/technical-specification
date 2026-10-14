@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, DomainError, NotFoundError
 from app.models import User, UserMemory
+from app.services import audit
 
 MAX_FACTS = 30
 MAX_LENGTH = 300
@@ -51,6 +52,9 @@ async def remember(
         )
     fact = UserMemory(user_id=user.id, text=text, normalized=key, conversation_id=conversation_id)
     session.add(fact)
+    await session.flush()
+    # Память влияет на ответы ассистента — её изменения видны в журнале
+    audit.record(session, user, "memory", fact.id, "remember", after={"text": text})
     await session.commit()
     return fact, True
 
@@ -61,5 +65,6 @@ async def forget(session: AsyncSession, user: User, fact_id: int) -> None:
     )
     if fact is None:  # чужой факт неотличим от несуществующего
         raise NotFoundError("Факт не найден")
+    audit.record(session, user, "memory", fact.id, "forget", before={"text": fact.text})
     await session.delete(fact)
     await session.commit()

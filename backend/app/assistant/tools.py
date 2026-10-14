@@ -36,6 +36,8 @@ class ToolContext:
     user_text: str = ""
     # Сервис курсов (None — настоящий из настроек; в тестах подменяется)
     rates: Any = None
+    # Результаты инструментов этого хода: факт для памяти не может быть цитатой из них
+    data_seen: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -91,7 +93,9 @@ class ToolRegistry:
             )
             return _error(f"Некорректные аргументы: {problems}"), raw
         try:
-            return await tool.handler(ctx, args), args.model_dump(mode="json")
+            outcome = await tool.handler(ctx, args)
+            ctx.data_seen.append(json.dumps(outcome.output, ensure_ascii=False, default=str))
+            return outcome, args.model_dump(mode="json")
         except DomainError as exc:
             # Отказ по правам, «не найдено», «не хватает» — понятный текст и для модели
             await _recover(ctx)

@@ -35,9 +35,7 @@ async def test_receipt_dated_today_is_not_in_the_future(session, moscow_night):
     data = ReceiptIn(
         supplier_id=supplier.id,
         received_on=date(2026, 10, 19),
-        lines=[
-            ReceiptLineIn(material_id=material.id, quantity=1, price=1, currency=Currency.RUB)
-        ],
+        lines=[ReceiptLineIn(material_id=material.id, quantity=1, price=1, currency=Currency.RUB)],
     )
     created = await batches.create_receipt(session, user, data, FakeRates())
     assert created.batches[0].received_on == date(2026, 10, 19)
