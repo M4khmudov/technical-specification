@@ -257,6 +257,11 @@ async def run_case(
             "tools_called": [t["name"] for t in observation.tools],
             "actions_proposed": [a["preview"].get("title") for a in observation.actions],
             "code_executed": bool(observation.code_runs),
+            # Судья не видит картинку — даём ему вывод кода и список созданных файлов
+            "code_output": pii.mask(
+                "\n".join(str(r.get("logs", "")) for r in observation.code_runs)[-2000:]
+            ),
+            "files_created": [f["filename"] for f in observation.files],
         }
         # Уборка: диалог (с сообщениями, файлами и предложениями) и память служебного пользователя
         await session.execute(delete(Conversation).where(Conversation.id == conversation_id))

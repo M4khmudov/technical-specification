@@ -331,6 +331,32 @@ COST_BASIS = {
 }
 
 
+def _cost_by_material(lines) -> list[dict[str, str]]:
+    totals: dict[str, dict] = {}
+    for line in lines:
+        row = totals.setdefault(
+            line.material_code,
+            {
+                "name": line.material_name,
+                "unit": line.unit,
+                "qty": Decimal("0"),
+                "sum": Decimal("0"),
+            },
+        )
+        row["qty"] += line.quantity
+        row["sum"] += line.amount
+    return [
+        {
+            "material": code,
+            "name": t["name"],
+            "quantity": str(t["qty"]),
+            "unit": t["unit"],
+            "amount_rub": str(t["sum"]),
+        }
+        for code, t in totals.items()
+    ]
+
+
 async def get_job_cost(ctx: ToolContext, args: JobArgs) -> ToolOutcome:
     report = await analytics.job_cost_breakdown(ctx.session, args.job_number)
     job = report.job
@@ -356,6 +382,9 @@ async def get_job_cost(ctx: ToolContext, args: JobArgs) -> ToolOutcome:
             }
             for line in report.lines
         ],
+        # Итоги по материалам — чтобы модель не складывала строки сама (её суммы не
+        # сверить с данными, а ошибиться в сложении легко)
+        "by_material": _cost_by_material(report.lines),
         "not_covered_by_reserve": [
             {"material": code, "name": name, "deficit": str(qty), "unit": unit}
             for code, name, qty, unit in report.uncovered
