@@ -1,5 +1,6 @@
 """Демо-данные: всё, что требует ТЗ, на месте, и повторный запуск ничего не дублирует."""
 
+import pytest
 from sqlalchemy import func, select
 
 from app.core import clock
@@ -85,3 +86,21 @@ async def test_seed_is_idempotent(session):
     before = await session.scalar(select(func.count()).select_from(Batch))
     assert await seed(session, FakeRates()) is False
     assert await session.scalar(select(func.count()).select_from(Batch)) == before
+
+
+async def test_failed_seed_leaves_no_half_data(engine, monkeypatch):
+    """M8: сид упал на середине — в базе ничего не осталось, следующий запуск начнёт заново."""
+    from app import seed as seed_module
+    from app.services import production
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("сбой посреди сида")
+
+    monkeypatch.setattr(production, "complete_job", broken)
+    with pytest.raises(RuntimeError):
+        await seed_module.seed_atomically(engine, FakeRates())
+    async with engine.connect() as conn:
+        users = await conn.scalar(
+            select(func.count()).select_from(User).where(User.login.in_(["sklad", "tech", "boss"]))
+        )
+    assert users == 0

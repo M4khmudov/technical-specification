@@ -20,13 +20,13 @@ from decimal import Decimal
 
 import httpx
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core import clock
 from app.core.config import get_settings
 from app.core.errors import DomainError
 from app.core.security import hash_password
-from app.db.session import SessionLocal
+from app.db.session import engine
 from app.models import (
     AuditLog,
     Batch,
@@ -484,10 +484,24 @@ async def _seed(session: AsyncSession, rates: RatesProvider) -> bool:
     return True
 
 
+async def seed_atomically(engine: AsyncEngine, rates: RatesProvider | None = None) -> bool:
+    """Всё или ничего. Сервисы внутри сида сами коммитят — здесь их коммиты становятся
+    точками сохранения внутри одной внешней транзакции. Если сид упадёт на середине
+    (например, недоступен сервис курсов), в базе не останется половины демо-данных,
+    из-за которых следующий запуск решил бы «данные уже есть» и ничего не доделал."""
+    async with engine.connect() as conn, conn.begin():
+        session = AsyncSession(
+            bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
+        try:
+            return await seed(session, rates)
+        finally:
+            await session.close()
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
-    async with SessionLocal() as session:
-        await seed(session)
+    await seed_atomically(engine)
 
 
 if __name__ == "__main__":
