@@ -304,7 +304,7 @@ async def judge(llm: LLMRouter, judge_input: dict[str, Any]) -> dict[str, Any]:
     payload = json.dumps(judge_input, ensure_ascii=False, indent=2)
     result: dict[str, Any] = {}
     for attempt in range(2):
-        text = payload if attempt == 0 else payload + "\n\nОтветь ТОЛЬКО одним JSON-объектом."
+        text = payload if attempt == 0 else payload + "\n\n" + load_prompt("eval_judge_retry")
         request = LLMRequest(
             instructions=load_prompt("eval_judge"),
             items=[UserMessage(text)],
