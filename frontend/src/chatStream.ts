@@ -108,3 +108,9 @@ function dispatch(block: string, handlers: StreamHandlers) {
       break
   }
 }
+
+// Ответ, у которого поток закончился без события done, — не «отвечает», а оборван
+export function settleUnfinished<T extends { role: string; status: string; status_label: string }>(m: T): T {
+  if (m.role !== 'assistant' || m.status !== 'streaming') return m
+  return { ...m, status: 'interrupted', status_label: 'Ответ оборван' }
+}

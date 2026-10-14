@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, getToken } from '../api'
 import type { ToolRecord } from '../chatStream'
-import { streamAnswer } from '../chatStream'
+import { settleUnfinished, streamAnswer } from '../chatStream'
 import ActionCard from '../components/ActionCard'
 import { useConfirm } from '../useConfirm'
 import MemoryPanel from '../components/MemoryPanel'
@@ -279,6 +279,13 @@ export default function AssistantPage() {
       busyRef.current = false
       setStreamingId(null)
       setBusy(false)
+      // Поток закончился без финального события («Остановить» до начала ответа, обрыв
+      // связи): не оставляем «Думаю…» навсегда — помечаем и берём сохранённое сервером
+      patchLast(settleUnfinished)
+      if (cid) {
+        detail.reload()
+        setTimeout(detail.reload, 1500) // сервер мог ещё дописывать оборванный ответ
+      }
       list.reload()
       setMemoryVersion((v) => v + 1) // ассистент мог что-то запомнить
     }
