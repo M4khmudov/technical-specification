@@ -88,9 +88,10 @@ def _length() -> Completed:
 
 async def test_error_event_inside_stream_switches_to_fallback():
     """Настоящий SDK: событие error в SSE-потоке — сбой провайдера, а не «внутренняя ошибка»."""
+    # Так OpenAI сообщает о сбое посреди потока: SDK бросает openai.APIError
     body = (
-        'event: error\ndata: {"type": "error", "code": "server_error", '
-        '"message": "The server had an error", "param": null, "sequence_number": 0}\n\n'
+        'event: error\ndata: {"error": {"type": "server_error", "code": "server_error", '
+        '"message": "The server had an error while processing your request"}}\n\n'
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
