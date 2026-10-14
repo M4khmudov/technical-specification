@@ -20,6 +20,7 @@ from app.llm.types import (
     AssistantMessage,
     CodeInterpreterSpec,
     Completed,
+    Heartbeat,
     LLMRequest,
     Started,
     TextDelta,
@@ -246,7 +247,7 @@ def test_sdk_events_are_mapped():
     assert done == Completed(
         model="gpt-4.1-2025", response_id="resp_1", input_tokens=100, output_tokens=20
     )
-    assert map_event(SimpleNamespace(type="response.in_progress")) is None
+    assert map_event(SimpleNamespace(type="response.in_progress")) == Heartbeat()
 
 
 def _status_error(status: int) -> openai.APIStatusError:

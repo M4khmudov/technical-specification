@@ -12,6 +12,7 @@ from app.llm.types import (
     Completed,
     Event,
     FileCited,
+    Heartbeat,
     LLMRequest,
     TextDelta,
     ToolCall,
@@ -69,6 +70,14 @@ def to_tools(request: LLMRequest) -> list[dict[str, Any]]:
     return tools
 
 
+# Выполнение кода: дальше событий может не быть долго
+SLOW_EVENTS = {
+    "response.code_interpreter_call.in_progress",
+    "response.code_interpreter_call.interpreting",
+    "response.code_interpreter_call_code.done",
+}
+
+
 def map_event(event: Any) -> Event | None:
     """Событие SDK → нейтральное событие (или None, если оно нам не нужно)."""
     kind = getattr(event, "type", None)
@@ -95,11 +104,14 @@ def map_event(event: Any) -> Event | None:
         if get("type") == "container_file_citation":
             return FileCited(get("container_id"), get("file_id"), get("filename") or "")
         return None
-    if kind == "response.completed":
+    if kind in ("response.completed", "response.incomplete"):
+        # incomplete — ответ обрезан по лимиту токенов: это не «готово»
         response = event.response
         usage = getattr(response, "usage", None)
         has_calls = any(o.type == "function_call" for o in (response.output or []))
-        incomplete = getattr(response, "status", None) == "incomplete"
+        incomplete = kind == "response.incomplete" or getattr(response, "status", None) == (
+            "incomplete"
+        )
         return Completed(
             model=response.model,
             response_id=response.id,
@@ -114,7 +126,9 @@ def map_event(event: Any) -> Event | None:
         # server_error / rate_limit_exceeded — сбой провайдера, остальное — ошибка запроса
         retryable = code in ("server_error", "rate_limit_exceeded", "") or "rate" in code
         raise LLMError(f"{kind}: {code} {message}", retryable=retryable)
-    return None
+    # Остальные события (создан ответ, идёт выполнение кода…) — признак жизни: без них
+    # таймаут ожидания срабатывал, пока Code Interpreter молча работал с файлом
+    return Heartbeat(slow=kind in SLOW_EVENTS)
 
 
 class OpenAIProvider:
@@ -194,6 +208,13 @@ class OpenAIProvider:
                 retryable=retryable,
                 status=exc.status_code,
             ) from exc
+        except openai.APIError as exc:
+            # Ошибка, пришедшая внутри потока (событие error в SSE): SDK бросает APIError
+            # без кода HTTP. Раньше она уходила мимо и превращалась во «внутреннюю ошибку»
+            # без перехода на запасную модель
+            code = str(getattr(exc, "code", "") or "")
+            retryable = code in ("", "server_error", "rate_limit_exceeded") or "rate" in code
+            raise LLMError(f"stream error: {code} {exc.message}", retryable=retryable) from exc
 
     # ---------------------------------------------------------------- файлы Code Interpreter
 

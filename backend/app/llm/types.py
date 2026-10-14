@@ -110,4 +110,12 @@ class Completed:
     finish: Literal["stop", "tool_calls", "length"] = "stop"
 
 
-Event = Started | TextDelta | ToolCallRequested | CodeExecuted | FileCited | Completed
+@dataclass(frozen=True)
+class Heartbeat:
+    """Провайдер жив, но показывать нечего (служебное событие потока). slow — началась
+    долгая операция без событий (Code Interpreter выполняет код): ждём дольше."""
+
+    slow: bool = False
+
+
+Event = Started | TextDelta | ToolCallRequested | CodeExecuted | FileCited | Completed | Heartbeat

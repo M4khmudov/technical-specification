@@ -21,6 +21,7 @@ from app.assistant.pii import Pseudonymizer, StreamUnmasker, mask_data
 from app.assistant.tools import ToolContext, ToolRegistry
 from app.llm.router import LLMRouter
 from app.llm.types import (
+    AssistantMessage,
     CodeExecuted,
     Completed,
     FileCited,
@@ -57,6 +58,7 @@ class TurnState:
     code_runs: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # предупреждения под ответом
     containers: list[str] = field(default_factory=list)  # контейнеры Code Interpreter
+    truncated: bool = False  # ответ обрезан по лимиту длины — не «готово»
 
     @property
     def content(self) -> str:
@@ -84,6 +86,7 @@ async def run_turn(
         state.unmasker = pii.stream_unmasker()
     for _ in range(MAX_STEPS):
         calls: list[ToolCall] = []
+        step_text: list[str] = []  # текст модели на этом шаге — как она его написала
         request = LLMRequest(
             instructions=instructions,
             items=items,
@@ -93,8 +96,12 @@ async def run_turn(
         )
         async for event in llm.stream(request):
             if isinstance(event, Started):
-                state.model = event.model
-                state.fallback_from = event.fallback_from
+                # Если хоть на одном шаге отвечала запасная модель — так и показываем:
+                # следующий шаг основной моделью этого не отменяет
+                if event.fallback_from:
+                    state.model, state.fallback_from = event.model, event.fallback_from
+                elif state.fallback_from is None:
+                    state.model = event.model
                 yield ChatEvent(
                     "model",
                     {
@@ -104,6 +111,11 @@ async def run_turn(
                     },
                 )
             elif isinstance(event, TextDelta):
+                if not step_text and state.content and not state.content[-1].isspace():
+                    # Текст нового шага — с новой строки, а не «№27.Подготовить»
+                    state.text.append("\n\n")
+                    yield ChatEvent("delta", {"text": "\n\n"})
+                step_text.append(event.text)
                 text = state.unmasker.feed(event.text) if state.unmasker else event.text
                 if text:
                     state.text.append(text)
@@ -121,11 +133,16 @@ async def run_turn(
             elif isinstance(event, Completed):
                 state.input_tokens += event.input_tokens or 0
                 state.output_tokens += event.output_tokens or 0
+                state.truncated = event.finish == "length"
         tail = state.flush()
         if tail:
             yield ChatEvent("delta", {"text": tail})
         if not calls:
             return
+        if step_text:
+            # То, что модель написала перед вызовом инструментов, — в историю шага:
+            # иначе на следующем шаге она его не видит и повторяет или обрывает мысль
+            items.append(AssistantMessage("".join(step_text)))
 
         for call in calls:
             yield ChatEvent("tool", {"name": call.name, "status": "started"})

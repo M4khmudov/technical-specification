@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from app.llm.base import FileStore, LLMProvider
 from app.llm.errors import LLMError, LLMInterruptedError, LLMUnavailableError
-from app.llm.types import Completed, Event, LLMRequest, Started, TextDelta
+from app.llm.types import Completed, Event, Heartbeat, LLMRequest, Started, TextDelta
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,21 @@ class Route:
 
 
 class LLMRouter:
-    def __init__(self, routes: list[Route], *, event_timeout: float, total_timeout: float):
+    def __init__(
+        self,
+        routes: list[Route],
+        *,
+        event_timeout: float,
+        total_timeout: float,
+        slow_event_timeout: float | None = None,
+    ):
         if not routes:
             raise ValueError("нужна хотя бы одна модель")
         self.routes = routes
         self.event_timeout = event_timeout
         self.total_timeout = total_timeout
+        # Пока Code Interpreter выполняет код, событий может не быть дольше обычного
+        self.slow_event_timeout = max(slow_event_timeout or event_timeout, event_timeout)
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[Event]:
         errors: list[LLMError] = []
@@ -53,19 +62,24 @@ class LLMRouter:
             deadline = started_at + self.total_timeout
             events = route.provider.stream(request, route.model).__aiter__()
             started = False
+            wait = self.event_timeout
             try:
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise LLMError("total timeout", retryable=True)
                     try:
-                        event = await asyncio.wait_for(
-                            anext(events), timeout=min(self.event_timeout, remaining)
-                        )
+                        event = await asyncio.wait_for(anext(events), timeout=min(wait, remaining))
                     except StopAsyncIteration:
                         break
                     except TimeoutError as exc:
                         raise LLMError("timeout waiting for model", retryable=True) from exc
+                    if isinstance(event, Heartbeat):
+                        # Признак жизни: таймаут ожидания отсчитывается заново. Наружу не
+                        # отдаём и началом ответа не считаем — переход на запасную ещё возможен
+                        wait = self.slow_event_timeout if event.slow else self.event_timeout
+                        continue
+                    wait = self.event_timeout
                     if not started:
                         started = True
                         yield Started(

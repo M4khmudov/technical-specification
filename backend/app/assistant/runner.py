@@ -54,6 +54,7 @@ WEEKDAYS = ["понедельник", "вторник", "среда", "четв�
 
 _running: dict[int, asyncio.Task] = {}
 _stop_requested: set[int] = set()
+_answered: set[int] = set()  # ответ сохранён, задача только прибирает файлы
 
 
 @dataclass
@@ -224,6 +225,35 @@ def check_grounding(state: TurnState, items: list[Item]) -> None:
         state.notes.append(UNGROUNDED_NOTE.format(numbers=shown))
 
 
+TRUNCATED = (
+    "Ответ обрезан: достигнут предел длины ответа. Попросите продолжить или уточните вопрос."
+)
+CLEANUP_TIMEOUT_SECONDS = 15
+
+
+async def _finish(coro) -> bool:
+    """Довести до конца, даже если задачу отменяют повторно («Остановить», закрытая
+    вкладка): сохранение уже показанного ответа не должно обрываться.
+    Возвращает, была ли за это время отмена."""
+    task = asyncio.ensure_future(coro)
+    cancelled = False
+    while True:
+        try:
+            await asyncio.shield(task)
+            return cancelled
+        except asyncio.CancelledError:
+            cancelled = True
+            if task.done():
+                return cancelled
+
+
+async def _cleanup(ci: CodeInterpreterSession) -> None:
+    try:
+        await asyncio.wait_for(ci.cleanup(), CLEANUP_TIMEOUT_SECONDS)
+    except Exception:  # noqa: BLE001 — копии у провайдера удалятся сами; ответ важнее
+        logger.warning("code interpreter cleanup failed")
+
+
 async def generate(
     turn: Turn, llm: LLMRouter, registry: ToolRegistry, queue: asyncio.Queue[ChatEvent]
 ) -> None:
@@ -233,6 +263,7 @@ async def generate(
         llm.files, None, code_without_files=llm.files is None and llm.code_interpreter
     )
     files: list[ChatFile] = []
+    cancelled = False
     try:
         async with SessionLocal() as session:
             user = await session.get(User, turn.user_id)
@@ -256,27 +287,33 @@ async def generate(
             except LLMUnavailableError as exc:
                 status = MessageStatus.INTERRUPTED if state.content else MessageStatus.ERROR
                 error = exc.user_message
+            if status == MessageStatus.COMPLETE and state.truncated:
+                status, error = MessageStatus.INTERRUPTED, TRUNCATED
             files = await _finalize(session, turn, state, ci)
             check_grounding(state, turn.items)
             check_actions(state)
             for f in files:
                 await queue.put(ChatEvent("file", file_out(f)))
     except asyncio.CancelledError:
+        cancelled = True
         state.flush()
         stopped = turn.message_id in _stop_requested
         status = MessageStatus.STOPPED if stopped else MessageStatus.INTERRUPTED
         error = None if stopped else "Соединение прервано до окончания ответа"
-        await asyncio.shield(_save(turn, state, status, error))
-        await asyncio.shield(ci.cleanup())
-        queue.put_nowait(_done(turn, state, status, error))
-        raise
     except Exception:
         logger.exception("assistant turn failed")
         status = MessageStatus.INTERRUPTED if state.content else MessageStatus.ERROR
         error = "Внутренняя ошибка ассистента. Попробуйте ещё раз."
-    await ci.cleanup()  # копии файлов у провайдера больше не нужны
-    await _save(turn, state, status, error)
-    await queue.put(_done(turn, state, status, error, files))
+    # Сначала сохраняем ответ (пользователь его уже видел) и закрываем поток, потом
+    # прибираем файлы у провайдера: отмена на этом этапе раньше теряла ответ, он
+    # оставался «отвечает…» и блокировал диалог, а поток SSE не завершался
+    cancelled |= await _finish(_save(turn, state, status, error))
+    _answered.add(turn.message_id)
+    queue.put_nowait(_done(turn, state, status, error, files))
+    cancelled |= await _finish(_cleanup(ci))
+    _answered.discard(turn.message_id)
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 def sse(event: ChatEvent) -> str:
@@ -292,20 +329,25 @@ async def stream_turn(turn: Turn, llm: LLMRouter, registry: ToolRegistry) -> Asy
     # браузера она ещё сохраняет ответ в БД
     _running[turn.message_id] = task
     task.add_done_callback(lambda _: _forget(turn.message_id))
+    answered = False
     try:
         yield sse(ChatEvent("start", {"message_id": turn.message_id}))
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
             except TimeoutError:
+                if task.done() and queue.empty():
+                    break  # задача завершилась, не отдав «done», — не держим поток вечно
                 yield ": keep-alive\n\n"  # прокси не закроют «молчащее» соединение
                 continue
             yield sse(event)
             if event.type == "done":
+                answered = True
                 break
     finally:
-        # Браузер отключился раньше конца ответа — останавливаем генерацию
-        if not task.done():
+        # Браузер отключился раньше конца ответа — останавливаем генерацию. Если ответ
+        # уже сохранён и отдан, задача только прибирает файлы у провайдера — не мешаем
+        if not task.done() and not answered:
             task.cancel()
             try:
                 await task
@@ -318,11 +360,12 @@ async def stream_turn(turn: Turn, llm: LLMRouter, registry: ToolRegistry) -> Asy
 def _forget(message_id: int) -> None:
     _running.pop(message_id, None)
     _stop_requested.discard(message_id)
+    _answered.discard(message_id)
 
 
 def request_stop(message_id: int) -> bool:
     task = _running.get(message_id)
-    if task is None or task.done():
+    if task is None or task.done() or message_id in _answered:
         return False
     _stop_requested.add(message_id)
     task.cancel()

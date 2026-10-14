@@ -52,6 +52,7 @@ def build_router(settings: Settings) -> LLMRouter:
         routes,
         event_timeout=settings.llm_event_timeout_seconds,
         total_timeout=settings.llm_timeout_seconds,
+        slow_event_timeout=settings.llm_code_timeout_seconds,
     )
 
 

@@ -101,7 +101,12 @@ def recording_router(base: LLMRouter) -> tuple[LLMRouter, list[Recording]]:
     for route in base.routes:
         wrapper = wrappers.setdefault(id(route.provider), Recording(route.provider))
         routes.append(Route(wrapper, route.model))
-    router = LLMRouter(routes, event_timeout=base.event_timeout, total_timeout=base.total_timeout)
+    router = LLMRouter(
+        routes,
+        event_timeout=base.event_timeout,
+        total_timeout=base.total_timeout,
+        slow_event_timeout=base.slow_event_timeout,
+    )
     return router, list(wrappers.values())
 
 

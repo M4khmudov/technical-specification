@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # и весь ответ целиком
     llm_event_timeout_seconds: float = Field(default=30.0, gt=0)
     llm_timeout_seconds: float = Field(default=120.0, gt=0)
+    # Ожидание события, пока Code Interpreter выполняет код (он может молчать дольше)
+    llm_code_timeout_seconds: float = Field(default=90.0, gt=0)
 
     jwt_secret: SecretStr = SecretStr("change-me-to-a-long-random-string-of-32-plus-chars")
 
