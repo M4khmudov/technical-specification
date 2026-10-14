@@ -37,8 +37,12 @@ async def accept_report(
     if not idempotency_key:
         raise HTTPException(400, "Не передан заголовок Idempotency-Key")
 
-    if _random.random() < FAILURE_RATE:
+    # Один бросок на запрос: FAILURE_RATE всех запросов — 500, SLOW_RATE всех — медленно.
+    # (Раньше медленными были 15 % от успешных, то есть около 10 % всех.)
+    roll = _random.random()
+    if roll < FAILURE_RATE:
         raise HTTPException(500, "Сервис маркировки временно недоступен")
+    slow = roll < FAILURE_RATE + SLOW_RATE
 
     existing = _reports.get(idempotency_key)
     if existing is None:
@@ -52,7 +56,7 @@ async def accept_report(
     else:
         duplicate = True
 
-    if _random.random() < SLOW_RATE:
+    if slow:
         await asyncio.sleep(SLOW_SECONDS)
 
     return {"report_id": existing["report_id"], "duplicate": duplicate}

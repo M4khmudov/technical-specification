@@ -13,6 +13,9 @@ x-backend-env: &backend-env
   LLM_FALLBACK: ${LLM_FALLBACK:-openai:gpt-4.1-mini}
   LLM_EVENT_TIMEOUT_SECONDS: ${LLM_EVENT_TIMEOUT_SECONDS:-30}
   LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
+  LLM_CODE_TIMEOUT_SECONDS: ${LLM_CODE_TIMEOUT_SECONDS:-90}
+  EVAL_JUDGE_MODEL: ${EVAL_JUDGE_MODEL:-openai:gpt-5.4-mini}
+  SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
   # Не задан — бэкенд сгенерирует случайный при запуске
   JWT_SECRET: ${JWT_SECRET:-}
 
@@ -25,7 +28,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-candles}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     ports:
       # только с этой машины (для pytest); снаружи база недоступна
       - "127.0.0.1:5433:5432"
@@ -43,11 +46,16 @@ services:
 
   mocks:
     build: ./mocks
+    environment:
+      MARKING_FAILURE_RATE: ${MARKING_FAILURE_RATE:-0.3}
+      MARKING_SLOW_RATE: ${MARKING_SLOW_RATE:-0.15}
+      MARKING_SLOW_SECONDS: ${MARKING_SLOW_SECONDS:-10}
     ports:
       - "127.0.0.1:8001:8001"
 
   backend:
-    build: ./backend
+    build: { context: ./backend, target: runtime }
+    image: candles-backend
     environment: *backend-env
     volumes:
       # отчёты прогона эталонных вопросов (python -m app.evals.run) — наружу, в репозиторий
@@ -58,20 +66,36 @@ services:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
       mocks: { condition: service_started }
+    # здоров — значит миграции и демо-данные уже применены, API отвечает
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 5s
+      retries: 60
+      start_period: 10s
 
   worker:
-    build: ./backend
+    # тот же образ, что у backend: собирается один раз
+    image: candles-backend
     command: ["arq", "app.worker.WorkerSettings"]
     environment: *backend-env
     depends_on:
-      backend: { condition: service_started }
+      # воркер стартует после миграций (их применяет backend при запуске)
+      backend: { condition: service_healthy }
 
   frontend:
     build: ./frontend
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend: { condition: service_healthy }
+
+  # Тесты и линтеры в контейнере: docker compose --profile test run --rm tests
+  tests:
+    profiles: ["test"]
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    depends_on:
+      db: { condition: service_healthy }
 
 volumes:
   pgdata:
