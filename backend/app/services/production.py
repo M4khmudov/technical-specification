@@ -138,7 +138,7 @@ def _codes(job: ProductionJob) -> dict[int, str]:
 def _reservation_totals(job: ProductionJob) -> dict[str, str]:
     """Резерв по материалам для журнала — по кодам, чтобы запись читалась человеком."""
     codes = _codes(job)
-    return {codes[mid]: str(qty) for mid, qty in sorted(_reserved_by_material(job).items())}
+    return {codes[mid]: audit.plain(qty) for mid, qty in sorted(_reserved_by_material(job).items())}
 
 
 async def _reserve_deficits(session: AsyncSession, actor: User, job: ProductionJob) -> None:
@@ -224,7 +224,10 @@ async def create_job(
         "job",
         job.id,
         "create",
-        after=audit.snapshot(job, ["number", "recipe_id", "quantity", "planned_on", "status"]),
+        after={
+            "recipe": recipe.name,
+            **audit.snapshot(job, ["number", "quantity", "planned_on", "status"]),
+        },
     )
     await session.commit()
     if plan:
@@ -402,7 +405,7 @@ async def complete_job(
         before={"status": JobStatus.IN_PROGRESS.value},
         after={
             "status": job.status.value,
-            "actual": {_codes(job)[mid]: str(q) for mid, q in sorted(actual.items())},
+            "actual": {_codes(job)[mid]: audit.plain(q) for mid, q in sorted(actual.items())},
         },
     )
     # Отчёт в сервис маркировки — в той же транзакции (outbox): завершение не ждёт

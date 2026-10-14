@@ -401,3 +401,22 @@ async def test_pieces_must_be_whole(session):
             job.id,
             JobCompleteIn(actuals=[ActualIn(material_id=shop.wick.id, actual_qty=D("40.5"))]),
         )
+
+
+async def test_audit_is_readable(session):
+    """M7: в журнале — изделие по имени и числа без «1E+3» и хвостовых нулей."""
+    from app.models import AuditLog
+
+    shop = await make_shop(session)
+    await batch(session, shop.wax, "1000", day=1)
+    await batch(session, shop.wick, "5000", day=1)
+    job = await service.create_job(session, shop.user, job_in(shop, 5000), plan=True)
+    logs = (
+        await session.scalars(
+            select(AuditLog).where(AuditLog.entity_id == job.id, AuditLog.entity_type == "job")
+        )
+    ).all()
+    created = next(log for log in logs if log.action == "create")
+    assert created.after["recipe"] == shop.recipe.name and "recipe_id" not in created.after
+    planned = next(log for log in logs if log.action == "plan")
+    assert planned.after["reserved"][shop.wax.code] == "1000"  # не «1E+3» и не «1000.000»

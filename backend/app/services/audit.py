@@ -14,12 +14,17 @@ from app.models import AuditLog, User
 
 def _jsonable(value: Any) -> Any:
     if isinstance(value, Decimal):
-        return str(value)  # строкой, чтобы не терять точность
+        # строкой, чтобы не терять точность; без хвостовых нулей и без «1E+3»
+        return format(value.normalize(), "f")
     if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, Enum):
         return value.value
     return value
+
+
+def plain(value: Decimal) -> str:
+    return format(Decimal(value).normalize(), "f")
 
 
 def snapshot(obj: Any, fields: list[str]) -> dict[str, Any]:

@@ -89,3 +89,52 @@ export const AUDIT_ACTION: Record<string, string> = {
   remember: 'Ассистент запомнил',
   forget: 'Факт удалён из памяти',
 }
+
+// Журнал: подписи полей и значения по-человечески («Статус: Запланировано», а не
+// «status: planned»; «1 000», а не «1000.000»)
+const AUDIT_KEY: Record<string, string> = {
+  status: 'Статус',
+  number: 'Номер',
+  recipe: 'Изделие',
+  material: 'Материал',
+  quantity: 'Количество',
+  planned_on: 'Дата задания',
+  price: 'Цена',
+  currency: 'Валюта',
+  exchange_rate: 'Курс',
+  rate_date: 'Курс на дату',
+  unit_cost_rub: 'Себестоимость ед., ₽',
+  comment: 'Комментарий',
+  reason: 'Причина',
+  reserved: 'Резерв',
+  actual: 'Факт расхода',
+  attempts: 'Попыток',
+  text: 'Факт',
+}
+
+const STATUS_TEXT: Record<string, string> = {
+  draft: 'Черновик',
+  planned: 'Запланировано',
+  in_progress: 'В работе',
+  completed: 'Завершено',
+  marked: 'Сервис маркировки',
+  cancelled: 'Отменено',
+  pending: 'На проверке',
+  accepted: 'Принята',
+  rejected: 'Брак',
+}
+
+export function auditKey(key: string): string {
+  return AUDIT_KEY[key] ?? key
+}
+
+export function auditText(key: string, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  const text = String(value)
+  if (key === 'status') return STATUS_TEXT[text] ?? text
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return fmtDate(text)
+  if (/^-?\d+(\.\d+)?(E[+-]?\d+)?$/i.test(text)) {
+    return Number(text).toLocaleString('ru-RU', { maximumFractionDigits: 6 })
+  }
+  return text
+}

@@ -1,5 +1,5 @@
 import type { AuditEntry } from '../api'
-import { AUDIT_ACTION, fmtDateTime } from '../format'
+import { AUDIT_ACTION, auditKey, auditText, fmtDateTime } from '../format'
 
 export function AuditValue({ value }: { value: Record<string, unknown> | null }) {
   if (!value) return <span className="text-stone-400">—</span>
@@ -7,11 +7,11 @@ export function AuditValue({ value }: { value: Record<string, unknown> | null })
     <ul className="space-y-0.5">
       {Object.entries(value).map(([key, v]) => (
         <li key={key}>
-          <span className="text-stone-500">{key}:</span>{' '}
+          <span className="text-stone-500">{auditKey(key)}:</span>{' '}
           {v && typeof v === 'object' ? (
             <AuditValue value={v as Record<string, unknown>} />
           ) : (
-            <span className="font-mono text-xs">{String(v)}</span>
+            <span>{auditText(key, v)}</span>
           )}
         </li>
       ))}

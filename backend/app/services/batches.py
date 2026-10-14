@@ -36,7 +36,17 @@ from app.services import audit
 from app.services.rates import RateQuote, RatesProvider
 
 UNIT_COST_STEP = Decimal("0.000001")  # точность numeric(16, 6)
-AUDIT_FIELDS = ["number", "material_id", "quantity", "price", "currency", "status", "comment"]
+AUDIT_FIELDS = [
+    "number",
+    "quantity",
+    "price",
+    "currency",
+    "exchange_rate",
+    "rate_date",
+    "unit_cost_rub",
+    "status",
+    "comment",
+]
 
 
 def batch_to_out(b: Batch) -> BatchOut:
@@ -135,7 +145,15 @@ async def create_receipt(
             )
         )
         audit.record(
-            session, actor, "batch", batch.id, "create", after=audit.snapshot(batch, AUDIT_FIELDS)
+            session,
+            actor,
+            "batch",
+            batch.id,
+            "create",
+            after={
+                "material": by_id[batch.material_id].name,
+                **audit.snapshot(batch, AUDIT_FIELDS),
+            },
         )
     await session.commit()
 
