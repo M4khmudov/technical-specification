@@ -2,7 +2,7 @@
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -201,10 +201,15 @@ _SORT_COLUMNS = {
     BatchSort.MATERIAL: Material.name,
     BatchSort.SUPPLIER: Supplier.name,
     BatchSort.QUANTITY: Batch.quantity,
-    BatchSort.FREE_QTY: Batch.remaining_qty - Batch.reserved_qty,
+    # «Свободно» у партии «На проверке» и брака — 0, как и показывается в реестре
+    BatchSort.FREE_QTY: case(
+        (Batch.status == BatchStatus.ACCEPTED, Batch.remaining_qty - Batch.reserved_qty),
+        else_=0,
+    ),
     BatchSort.UNIT_COST_RUB: Batch.unit_cost_rub,
     BatchSort.STATUS: Batch.status,
     BatchSort.CURRENCY: Batch.currency,
+    BatchSort.PRICE: (Batch.currency, Batch.price),
 }
 
 
@@ -243,10 +248,11 @@ async def list_batches(
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
 
-    column = _SORT_COLUMNS[sort]
-    order = column.desc() if descending else column.asc()
-    # id — второй ключ, чтобы порядок был стабильным между страницами
-    stmt = stmt.order_by(order, Batch.id.desc() if descending else Batch.id.asc())
+    columns = _SORT_COLUMNS[sort]
+    columns = columns if isinstance(columns, tuple) else (columns,)
+    order = [c.desc() if descending else c.asc() for c in columns]
+    # id — последний ключ, чтобы порядок был стабильным между страницами
+    stmt = stmt.order_by(*order, Batch.id.desc() if descending else Batch.id.asc())
     stmt = _with_refs(stmt).offset((page - 1) * size).limit(size)
     items = (await session.scalars(stmt)).all()
     return Page[BatchOut](

@@ -140,6 +140,12 @@ function MarkingCard({ jobId, onDelivered }: { jobId: number; onDelivered: () =>
   )
 }
 
+const COST_BASIS: Record<string, string> = {
+  actual: 'Себестоимость (факт)',
+  reserve: 'Себестоимость (оценка по резерву)',
+  stock_average: 'Себестоимость (оценка по средним ценам склада)',
+}
+
 export default function JobPage() {
   const { id } = useParams()
   const { can } = useAuth()
@@ -288,7 +294,7 @@ export default function JobPage() {
             {job.completed_at && <div className="flex justify-between"><dt className="text-stone-500">Завершено</dt><dd>{fmtDateTime(job.completed_at)}</dd></div>}
             {job.cancelled_at && <div className="flex justify-between"><dt className="text-stone-500">Отменено</dt><dd>{fmtDateTime(job.cancelled_at)}</dd></div>}
             <div className="flex justify-between">
-              <dt className="text-stone-500">{job.cost_is_final ? 'Себестоимость (факт)' : 'Себестоимость (оценка по резерву)'}</dt>
+              <dt className="text-stone-500">{COST_BASIS[job.cost_basis] ?? 'Себестоимость'}</dt>
               <dd className="font-medium">
                 {fmtMoney(job.cost_rub)}
                 {!job.cost_covers_all && <span className="block text-xs font-normal text-red-700">без учёта дефицита</span>}

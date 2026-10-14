@@ -193,6 +193,7 @@ export type Job = {
   reservations: Reservation[]
   cost_rub: string
   cost_is_final: boolean
+  cost_basis: 'actual' | 'reserve' | 'stock_average'
   cost_covers_all: boolean
 }
 

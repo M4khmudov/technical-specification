@@ -80,6 +80,9 @@ class JobOut(BaseModel):
     # после — по фактически списанным партиям
     cost_rub: Decimal
     cost_is_final: bool
+    # на чём основана себестоимость: actual — факт списания, reserve — оценка по
+    # резерву, stock_average — черновик, по средним ценам склада
+    cost_basis: str = "reserve"
     cost_covers_all: bool  # false, если часть материалов не зарезервирована
 
 

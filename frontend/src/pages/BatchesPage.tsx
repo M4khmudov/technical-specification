@@ -133,7 +133,7 @@ export default function BatchesPage() {
     {
       key: 'price',
       title: 'Цена',
-      sort: 'currency',
+      sort: 'price',
       align: 'right',
       filter: <SelectFilter name="currency" options={{ RUB: 'RUB', USD: 'USD', EUR: 'EUR' }} />,
     },

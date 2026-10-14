@@ -1,7 +1,6 @@
 """Аналитические запросы для ассистента и интерфейса: остатки, дефицит за период,
 разбивка себестоимости задания. Только чтение."""
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -10,8 +9,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import DomainError, NotFoundError
-from app.models import Batch, BatchMovement, Material, ProductionJob, Recipe
-from app.models.enums import BatchStatus, JobStatus, MovementKind
+from app.models import Batch, Material, ProductionJob, Recipe
+from app.models.enums import BatchStatus, JobStatus
 from app.schemas.production import JobOut
 from app.services import production
 
@@ -250,13 +249,13 @@ class CostLine:
     material_code: str
     material_name: str
     unit: str
-    batch_number: int
+    batch_number: int | None  # None — оценка черновика по средней цене склада
     quantity: Decimal
     unit_cost_rub: Decimal
 
     @property
     def amount(self) -> Decimal:
-        return (self.quantity * self.unit_cost_rub).quantize(Decimal("0.01"))
+        return production.money(self.quantity * self.unit_cost_rub)
 
 
 @dataclass
@@ -271,18 +270,18 @@ async def job_cost_breakdown(session: AsyncSession, number: int) -> CostReport:
     materials = {m.material_id: m for m in job.materials}
     lines: list[CostLine] = []
     if job.cost_is_final:
-        rows = await session.execute(
-            select(Batch.material_id, Batch.number, Batch.unit_cost_rub, BatchMovement.quantity)
-            .join(Batch, Batch.id == BatchMovement.batch_id)
-            .where(BatchMovement.job_id == job.id, BatchMovement.kind == MovementKind.CONSUME)
-            .order_by(Batch.material_id, Batch.number)
-        )
-        grouped: dict[tuple[int, int, Decimal], Decimal] = defaultdict(lambda: ZERO)
-        for mid, bn, cost, qty in rows:
-            grouped[(mid, bn, cost)] += qty
-        for (mid, bn, cost), qty in grouped.items():
+        for mid, bn, cost, qty in await production.consumed_lines(session, job.id):
             m = materials[mid]
             lines.append(CostLine(m.material_code, m.material_name, m.unit, bn, qty, cost))
+    elif job.cost_basis == "stock_average":
+        prices = await production.stock_unit_costs(session, list(materials))
+        for mid, m in materials.items():
+            if mid in prices:
+                lines.append(
+                    CostLine(
+                        m.material_code, m.material_name, m.unit, None, m.required_qty, prices[mid]
+                    )
+                )
     else:
         for r in job.reservations:
             m = materials[r.material_id]

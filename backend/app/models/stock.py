@@ -80,6 +80,10 @@ class Batch(Base):
 
     @property
     def free_qty(self) -> Decimal:
+        """Сколько можно зарезервировать. У партии «На проверке» и брака — ничего,
+        хотя физический остаток у неё есть."""
+        if self.status != BatchStatus.ACCEPTED:
+            return Decimal("0")
         return self.remaining_qty - self.reserved_qty
 
 

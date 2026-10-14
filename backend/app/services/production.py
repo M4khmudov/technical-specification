@@ -15,9 +15,9 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -469,12 +469,58 @@ async def cancel_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
 # ---------------------------------------------------------------- чтение
 
 
-def _light(job: ProductionJob, required: Decimal, reserved: Decimal) -> Light | None:
+def _light(job: ProductionJob, required: Decimal, covered: Decimal) -> Light | None:
     if job.status in FINISHED:
         return None
-    if reserved >= required:
+    if covered >= required:
         return Light.GREEN
-    return Light.YELLOW if reserved > 0 else Light.RED
+    return Light.YELLOW if covered > 0 else Light.RED
+
+
+MONEY = Decimal("0.01")
+
+
+def money(value: Decimal) -> Decimal:
+    """Деньги — до копейки, половина вверх; итог = сумма округлённых строк."""
+    return Decimal(value).quantize(MONEY, ROUND_HALF_UP)
+
+
+async def _free_stock(session: AsyncSession, material_ids: list[int]) -> dict[int, Decimal]:
+    rows = await session.execute(
+        select(Batch.material_id, func.sum(Batch.remaining_qty - Batch.reserved_qty))
+        .where(Batch.material_id.in_(material_ids), Batch.status == BatchStatus.ACCEPTED)
+        .group_by(Batch.material_id)
+    )
+    return {mid: Decimal(q) for mid, q in rows}
+
+
+async def stock_unit_costs(session: AsyncSession, material_ids: list[int]) -> dict[int, Decimal]:
+    """Текущая цена единицы материала в рублях: средняя по остатку принятых партий,
+    если его нет — последнее поступление, кроме брака."""
+    accepted = and_(
+        Batch.material_id.in_(material_ids),
+        Batch.status == BatchStatus.ACCEPTED,
+        Batch.remaining_qty > 0,
+    )
+    rows = await session.execute(
+        select(
+            Batch.material_id,
+            func.sum(Batch.remaining_qty * Batch.unit_cost_rub) / func.sum(Batch.remaining_qty),
+        )
+        .where(accepted)
+        .group_by(Batch.material_id)
+    )
+    costs = {mid: Decimal(v) for mid, v in rows}
+    missing = [m for m in material_ids if m not in costs]
+    if missing:
+        last = await session.execute(
+            select(Batch.material_id, Batch.unit_cost_rub)
+            .where(Batch.material_id.in_(missing), Batch.status != BatchStatus.REJECTED)
+            .distinct(Batch.material_id)
+            .order_by(Batch.material_id, Batch.received_on.desc(), Batch.id.desc())
+        )
+        costs.update({mid: v for mid, v in last})
+    return costs
 
 
 async def get_job(session: AsyncSession, job_id: int) -> JobOut:
@@ -485,6 +531,11 @@ async def get_job(session: AsyncSession, job_id: int) -> JobOut:
         raise NotFoundError(f"Задание #{job_id} не найдено")
 
     reserved = _reserved_by_material(job)
+    ids = [jm.material_id for jm in job.materials]
+    draft = job.status == JobStatus.DRAFT
+    # Черновик ничего не резервирует: «светофор» и дефицит у него — по свободному
+    # остатку склада сейчас (хватит ли при планировании), а не «всё красное»
+    covered = await _free_stock(session, ids) if draft else reserved
     materials = [
         JobMaterialOut(
             material_id=jm.material_id,
@@ -493,11 +544,11 @@ async def get_job(session: AsyncSession, job_id: int) -> JobOut:
             unit=jm.material.unit,
             required_qty=jm.required_qty,
             reserved_qty=reserved[jm.material_id],
-            deficit_qty=max(jm.required_qty - reserved[jm.material_id], ZERO)
+            deficit_qty=max(jm.required_qty - covered.get(jm.material_id, ZERO), ZERO)
             if job.status not in FINISHED
             else ZERO,
             actual_qty=jm.actual_qty,
-            light=_light(job, jm.required_qty, reserved[jm.material_id]),
+            light=_light(job, jm.required_qty, covered.get(jm.material_id, ZERO)),
         )
         for jm in job.materials
     ]
@@ -518,13 +569,22 @@ async def get_job(session: AsyncSession, job_id: int) -> JobOut:
 
     final = job.status in (JobStatus.COMPLETED, JobStatus.MARKED)
     if final:
-        cost = await session.scalar(
-            select(func.coalesce(func.sum(BatchMovement.quantity * Batch.unit_cost_rub), 0))
-            .join(Batch, Batch.id == BatchMovement.batch_id)
-            .where(BatchMovement.job_id == job.id, BatchMovement.kind == MovementKind.CONSUME)
+        basis = "actual"
+        cost = sum((money(q * c) for _, _, c, q in await consumed_lines(session, job.id)), ZERO)
+    elif draft:
+        basis = "stock_average"  # черновик: по текущим ценам склада, резерва ещё нет
+        prices = await stock_unit_costs(session, ids)
+        cost = sum(
+            (
+                money(jm.required_qty * prices[jm.material_id])
+                for jm in job.materials
+                if jm.material_id in prices
+            ),
+            ZERO,
         )
     else:
-        cost = sum((r.quantity * r.unit_cost_rub for r in reservations), ZERO)
+        basis = "reserve"
+        cost = sum((money(r.quantity * r.unit_cost_rub) for r in reservations), ZERO)
     has_deficit = any(m.deficit_qty > 0 for m in materials)
 
     return JobOut(
@@ -544,10 +604,27 @@ async def get_job(session: AsyncSession, job_id: int) -> JobOut:
         has_deficit=has_deficit,
         materials=materials,
         reservations=reservations,
-        cost_rub=Decimal(cost).quantize(Decimal("0.01")),
+        cost_rub=money(cost),
         cost_is_final=final,
+        cost_basis=basis,
         cost_covers_all=final or not has_deficit,
     )
+
+
+async def consumed_lines(
+    session: AsyncSession, job_id: int
+) -> list[tuple[int, int, Decimal, Decimal]]:
+    """Фактическое списание: (материал, номер партии, цена единицы, количество)."""
+    rows = await session.execute(
+        select(
+            Batch.material_id, Batch.number, Batch.unit_cost_rub, func.sum(BatchMovement.quantity)
+        )
+        .join(Batch, Batch.id == BatchMovement.batch_id)
+        .where(BatchMovement.job_id == job_id, BatchMovement.kind == MovementKind.CONSUME)
+        .group_by(Batch.material_id, Batch.number, Batch.unit_cost_rub)
+        .order_by(Batch.material_id, Batch.number)
+    )
+    return [(mid, n, c, Decimal(q)) for mid, n, c, q in rows]
 
 
 async def list_jobs(
@@ -566,8 +643,15 @@ async def list_jobs(
         )
         .scalar_subquery()
     )
+    free_sum = (
+        select(func.coalesce(func.sum(Batch.remaining_qty - Batch.reserved_qty), 0))
+        .where(Batch.material_id == JobMaterial.material_id, Batch.status == BatchStatus.ACCEPTED)
+        .scalar_subquery()
+    )
+    # У черновика дефицит — если свободного остатка не хватит; у остальных — по резерву
+    covered = case((ProductionJob.status == JobStatus.DRAFT, free_sum), else_=reserved_sum)
     deficit = exists().where(
-        JobMaterial.job_id == ProductionJob.id, JobMaterial.required_qty > reserved_sum
+        JobMaterial.job_id == ProductionJob.id, JobMaterial.required_qty > covered
     )
     stmt = select(ProductionJob, Recipe.name, deficit.label("has_deficit")).join(
         Recipe, Recipe.id == ProductionJob.recipe_id

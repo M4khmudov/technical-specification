@@ -53,7 +53,9 @@ async def test_receipt_lines_become_pending_batches_with_rub_cost(session):
     # 41.333333 × 100.1234 = 4138.4338332922 → округление до 6 знаков
     assert by_material[oil.id].unit_cost_rub == Decimal("4138.433833")
     assert by_material[wick.id].exchange_rate == Decimal("92.4567")
-    assert by_material[wax.id].free_qty == Decimal("25.5")
+    # M4: партия «На проверке» ничего не даёт зарезервировать — свободно 0
+    assert by_material[wax.id].free_qty == Decimal("0")
+    assert by_material[wax.id].remaining_qty == Decimal("25.5")
     # Курс запрашивается один раз на валюту
     assert sorted(c for c, _ in rates.calls) == [Currency.EUR, Currency.RUB, Currency.USD]
 
@@ -211,18 +213,18 @@ async def test_registry_filters_sorting_and_pagination(session):
     page = await service.list_batches(
         session,
         BatchFilter(material="соевый РЕЕСТР"),  # поиск без учёта регистра
-        sort=BatchSort.FREE_QTY,
+        sort=BatchSort.QUANTITY,
         descending=True,
         page=1,
         size=2,
     )
     assert page.total == 3
-    assert [b.free_qty for b in page.items] == [Decimal("50"), Decimal("20")]
+    assert [b.quantity for b in page.items] == [Decimal("50"), Decimal("20")]
 
     second = await service.list_batches(
-        session, BatchFilter(material="WAX-SOY-R"), BatchSort.FREE_QTY, True, page=2, size=2
+        session, BatchFilter(material="WAX-SOY-R"), BatchSort.QUANTITY, True, page=2, size=2
     )
-    assert [b.free_qty for b in second.items] == [Decimal("5")]
+    assert [b.quantity for b in second.items] == [Decimal("5")]
 
     by_supplier = await service.list_batches(session, BatchFilter(supplier="восковой двор» реестр"))
     assert by_supplier.total == 4
@@ -256,3 +258,25 @@ async def test_batch_history_shows_receipt_and_status_changes(session):
     assert [m.kind for m in history.movements] == [MovementKind.RECEIPT]
     assert history.movements[0].user_full_name == "Петров Иван Сергеевич"
     assert [a.action for a in history.audit] == ["create", "accept"]
+
+
+async def test_sorting_by_price_and_free_matches_what_is_shown(session):
+    """M3: «Цена» сортирует по цене (в пределах валюты), а не только по валюте; партия
+    «На проверке» в сортировке «Свободно» — как 0, а не среди принятых."""
+    from tests.factories import make_batch
+
+    material = await make_material(session, code="SORT-1", name="Сортировка")
+    cheap = await make_batch(session, material, "10", price="5")
+    pricey = await make_batch(session, material, "10", price="50")
+    pending = await make_batch(session, material, "999", status=BatchStatus.PENDING)
+
+    by_price = await service.list_batches(
+        session, BatchFilter(material="SORT-1"), BatchSort.PRICE, descending=False
+    )
+    assert [b.id for b in by_price.items] == [cheap.id, pricey.id, pending.id]  # 5, 50, 100 ₽
+
+    by_free = await service.list_batches(
+        session, BatchFilter(material="SORT-1"), BatchSort.FREE_QTY, descending=True
+    )
+    assert [b.id for b in by_free.items][-1] == pending.id
+    assert by_free.items[-1].free_qty == 0

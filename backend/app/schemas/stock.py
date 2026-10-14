@@ -71,6 +71,7 @@ class BatchSort(StrEnum):
     UNIT_COST_RUB = "unit_cost_rub"
     STATUS = "status"
     CURRENCY = "currency"
+    PRICE = "price"  # валюта, затем цена в ней
 
 
 class BatchFilter(BaseModel):

@@ -109,7 +109,11 @@ async def test_draft_reserves_nothing(session):
     job = await service.create_job(session, shop.user, job_in(shop, 10))
     assert job.status == JobStatus.DRAFT
     assert job.reservations == []
-    assert by_material(job, shop.wax).light == Light.RED
+    # M1: черновик не «красный», если на складе хватает: светофор — по свободному остатку
+    assert by_material(job, shop.wax).light == Light.GREEN
+    assert by_material(job, shop.wick).light == Light.RED  # фитилей на складе нет
+    assert job.has_deficit and job.cost_basis == "stock_average"
+    assert job.cost_rub == Decimal("200.00")  # 10 × 0,2 кг × 100 ₽ (фитилей нет — без них)
 
 
 async def test_job_in_the_past_rejected(session):
@@ -369,3 +373,16 @@ async def test_many_concurrent_plans_never_oversell(session_factory):
     assert total == D("10")  # 6 × 3 = 18 запрошено, отдано ровно сколько было
     async with session_factory() as s:
         assert (await s.get(Batch, stock.id)).reserved_qty == D("10")
+
+
+async def test_job_cost_total_is_the_sum_of_its_lines(session):
+    """M6: итог себестоимости равен сумме строк разбивки (раньше расходился на копейку)."""
+    from app.services import analytics
+
+    shop = await make_shop(session)
+    await batch(session, shop.wax, "0.1", day=1, price="0.025")  # 0,1 × 0,025 = 0,0025
+    await batch(session, shop.wax, "0.1", day=2, price="0.025")
+    await batch(session, shop.wick, "100", day=1, price="0.005")
+    job = await service.create_job(session, shop.user, job_in(shop, 1), plan=True)
+    report = await analytics.job_cost_breakdown(session, job.number)
+    assert report.job.cost_rub == sum((line.amount for line in report.lines), D("0"))

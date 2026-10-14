@@ -315,6 +315,13 @@ class JobArgs(BaseModel):
     job_number: Number = Field(description="Номер задания («задание №27» → 27)")
 
 
+COST_BASIS = {
+    "actual": "фактическое списание",
+    "reserve": "оценка по резерву",
+    "stock_average": "черновик: оценка по средним ценам склада, резерва ещё нет",
+}
+
+
 async def get_job_cost(ctx: ToolContext, args: JobArgs) -> ToolOutcome:
     report = await analytics.job_cost_breakdown(ctx.session, args.job_number)
     job = report.job
@@ -327,7 +334,7 @@ async def get_job_cost(ctx: ToolContext, args: JobArgs) -> ToolOutcome:
         },
         "cost_rub": str(job.cost_rub),
         "cost_per_unit_rub": str((job.cost_rub / job.quantity).quantize(Decimal("0.01"))),
-        "basis": "фактическое списание" if job.cost_is_final else "оценка по резерву",
+        "basis": COST_BASIS[job.cost_basis],
         "lines": [
             {
                 "material": line.material_code,
