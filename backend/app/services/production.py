@@ -21,6 +21,7 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import clock
 from app.core.errors import ConflictError, DomainError, NotFoundError
 from app.core.format import fmt_qty
 from app.core.permissions import Permission, require
@@ -196,7 +197,7 @@ async def create_job(
         raise NotFoundError(f"Рецепт #{data.recipe_id} не найден")
     if not recipe.items:
         raise DomainError(f"В рецепте «{recipe.name}» нет материалов")
-    if data.planned_on < date.today():
+    if data.planned_on < clock.today():
         raise DomainError("Дата задания не может быть в прошлом")
 
     job = ProductionJob(
@@ -234,6 +235,11 @@ async def plan_job(session: AsyncSession, actor: User, job_id: int) -> JobOut:
     require(actor, Permission.JOB_MANAGE)
     job = await _lock_job(session, job_id)
     _require_status(job, (JobStatus.DRAFT,), "запланировать")
+    if job.planned_on < clock.today():
+        raise DomainError(
+            f"Дата задания {job.planned_on:%d.%m.%Y} уже прошла — запланировать его нельзя. "
+            "Создайте задание на новую дату"
+        )
     job.status = JobStatus.PLANNED
     await _reserve_deficits(session, actor, job)
     audit.record(

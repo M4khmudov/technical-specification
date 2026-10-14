@@ -13,6 +13,7 @@ from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from app.assistant.safety import fact_is_from_user, untrusted
 from app.assistant.tools import Tool, ToolContext, ToolOutcome
+from app.core import clock
 from app.core.format import fmt_money, fmt_qty
 from app.models.enums import ACTION_STATUS_LABELS, Currency, JobStatus
 from app.services import actions, analytics, batches, exports, memory, production
@@ -24,7 +25,7 @@ Number = Annotated[int, Field(gt=0, lt=10_000_000)]
 
 
 def this_week(today: date | None = None) -> tuple[date, date]:
-    today = today or date.today()
+    today = today or clock.today()
     monday = today - timedelta(days=today.weekday())
     return monday, monday + timedelta(days=6)
 
@@ -61,7 +62,7 @@ class Period(BaseModel):
             self.date_from, self.date_to = monday, sunday
         elif self.date_from is None:
             # «до 26.10» — с сегодняшнего дня, а не один день 26.10
-            self.date_from = min(date.today(), self.date_to)
+            self.date_from = min(clock.today(), self.date_to)
         elif self.date_to is None:
             self.date_to = self.date_from + timedelta(days=6)
         if self.date_from > self.date_to:
@@ -129,7 +130,7 @@ async def get_material_price(ctx: ToolContext, args: PriceArgs) -> ToolOutcome:
     rows = await analytics.material_prices(ctx.session, materials)
     quote = None
     if args.currency != Currency.RUB:
-        quote = await (ctx.rates or get_rates_provider()).get_rate(args.currency, date.today())
+        quote = await (ctx.rates or get_rates_provider()).get_rate(args.currency, clock.today())
 
     def convert(rub: Decimal | None) -> str | None:
         if rub is None:

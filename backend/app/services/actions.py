@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import clock
 from app.core.errors import ConflictError, DomainError, NotFoundError
 from app.core.permissions import Permission, require
 from app.models import AssistantAction, RecipeItem, User
@@ -46,7 +47,7 @@ async def propose_create_job(
     data = JobCreateIn(
         recipe_id=recipe.id, quantity=quantity, planned_on=planned_on, comment=comment
     )
-    if data.planned_on < date.today():
+    if data.planned_on < clock.today():
         raise DomainError("Дата задания не может быть в прошлом")
 
     items = await _recipe_items(session, recipe.id)

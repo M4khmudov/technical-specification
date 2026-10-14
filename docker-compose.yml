@@ -4,6 +4,7 @@ x-backend-env: &backend-env
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-candles}:${POSTGRES_PASSWORD:-candles}@db:5432/${POSTGRES_DB:-candles}
   TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-candles}:${POSTGRES_PASSWORD:-candles}@db:5432/candles_test
   REDIS_URL: redis://redis:6379/0
+  TIMEZONE: ${TIMEZONE:-Europe/Moscow}
   RATES_SERVICE_URL: http://mocks:8001/rates
   MARKING_SERVICE_URL: http://mocks:8001/marking
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}

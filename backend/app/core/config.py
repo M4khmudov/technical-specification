@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "Candle Workshop"
+    # Часовой пояс мастерской: от него считается «сегодня» (сервер живёт по UTC)
+    timezone: str = "Europe/Moscow"
     debug: bool = False
 
     database_url: str = "postgresql+asyncpg://candles:candles@localhost:5433/candles"

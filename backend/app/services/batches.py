@@ -1,12 +1,12 @@
 """Поступления и партии: приход, приёмка/брак, реестр, история партии."""
 
-from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.core import clock
 from app.core.errors import ConflictError, DomainError, NotFoundError
 from app.core.permissions import Permission, require
 from app.models import (
@@ -74,7 +74,7 @@ async def create_receipt(
 ) -> ReceiptOut:
     """Оформить поступление: каждая строка становится партией «На проверке»."""
     require(actor, Permission.RECEIPT_CREATE)
-    if data.received_on > date.today():
+    if data.received_on > clock.today():
         raise DomainError("Дата поступления не может быть в будущем")
 
     supplier = await session.get(Supplier, data.supplier_id)

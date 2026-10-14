@@ -35,6 +35,7 @@ from app.assistant.safety import (
     ungrounded_numbers,
 )
 from app.assistant.tools import ToolContext, ToolRegistry
+from app.core import clock
 from app.core.errors import DomainError
 from app.db.session import SessionLocal
 from app.llm.errors import LLMError, LLMInterruptedError, LLMUnavailableError
@@ -70,7 +71,7 @@ def system_prompt(
     pii: Pseudonymizer | None = None,
 ) -> str:
     """Системный промпт: дата, роль и факты из памяти ТЕКУЩЕГО пользователя."""
-    today = today or date.today()
+    today = today or clock.today()
     memory_section = ""
     if facts:
         lines = "\n".join(f"- {pii.mask(f) if pii else f}" for f in facts)

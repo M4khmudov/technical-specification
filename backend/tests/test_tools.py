@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from app.assistant.tool_set import this_week
 from app.assistant.tools import ToolContext, default_registry
+from app.core import clock
 from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError
 from app.llm.types import ToolCall
 from app.models import AssistantAction, ChatMessage, Conversation, ProductionJob
@@ -21,7 +22,7 @@ from tests.factories import make_batch, make_material, make_recipe, make_user
 
 D = Decimal
 MONDAY, SUNDAY = this_week()
-IN_WEEK = max(date.today(), MONDAY)
+IN_WEEK = max(clock.today(), MONDAY)
 
 
 async def context(session, user) -> ToolContext:
@@ -402,7 +403,7 @@ async def test_tool_works_after_previous_tool_error(session, shop):
     technologist, *_ = shop
     ctx = await context(session, technologist)
     await session.commit()  # как в чате: данные уже в базе, откатывается только ошибка
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (clock.today() - timedelta(days=1)).isoformat()
     failed = await call(ctx, "create_job", recipe="Лаванда тест", quantity=5, planned_on=yesterday)
     assert not failed.ok and "прошлом" in failed.output["error"]
     retried = await call(
@@ -461,9 +462,9 @@ async def test_material_price_ignores_rejected_and_converts(session, shop):
 def test_open_period_bounds():
     from app.assistant.tool_set import Period
 
-    later = date.today() + timedelta(days=14)
+    later = clock.today() + timedelta(days=14)
     # «до 26.10» — с сегодняшнего дня, а не один день
-    assert Period(date_to=later).date_from == date.today()
+    assert Period(date_to=later).date_from == clock.today()
     # «с 20.10» — неделя от начала
     assert Period(date_from=later).date_to == later + timedelta(days=6)
     assert Period(date_from=later, date_to=later).date_to == later

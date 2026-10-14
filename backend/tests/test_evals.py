@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
+from app.core import clock
 from app.evals import checks as c
 from app.evals.cases import CASES, Case
 from app.evals.run import (
@@ -157,7 +158,7 @@ async def test_good_assistant_passes_all_checks(stock_case, session_factory):
     provider.push(*text_reply("Свободно 42,5 кг."))
     llm, recorders = recording_router(router_with(provider))
 
-    result, judge_input = await run_case(stock_case, llm, recorders, date.today())
+    result, judge_input = await run_case(stock_case, llm, recorders, clock.today())
 
     assert result.passed, [(x.name, x.details) for x in result.checks if not x.passed]
     assert result.tools == ["get_material_stock"]
@@ -179,7 +180,7 @@ async def test_bad_assistant_fails_machine_checks(stock_case):
     provider.push(*text_reply("Свободно примерно 100 кг."))  # без инструмента и с выдуманным числом
     llm, recorders = recording_router(router_with(provider))
 
-    result, _ = await run_case(stock_case, llm, recorders, date.today())
+    result, _ = await run_case(stock_case, llm, recorders, clock.today())
 
     assert not result.passed
     failed = {x.name for x in result.checks if not x.passed}
@@ -192,7 +193,7 @@ async def test_unavailable_model_is_reported_not_crashing(stock_case):
 
     provider = ScriptedProvider([LLMError("HTTP 500", retryable=True, status=500)])
     llm, recorders = recording_router(router_with(provider))
-    result, _ = await run_case(stock_case, llm, recorders, date.today())
+    result, _ = await run_case(stock_case, llm, recorders, clock.today())
     assert result.status == "error" and not result.passed
     assert "недоступен" in (result.error or "")
 
@@ -248,7 +249,7 @@ async def test_eval_users_are_service_accounts(session_factory, stock_case):
     provider = ScriptedProvider()
     provider.push(*text_reply("ок"))
     llm, recorders = recording_router(router_with(provider))
-    await run_case(stock_case, llm, recorders, date.today())
+    await run_case(stock_case, llm, recorders, clock.today())
     async with session_factory() as s:
         user = await s.scalar(select(User).where(User.login == "eval-manager"))
         assert user.role == Role.MANAGER

@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from app.core import clock
 from app.core.errors import ConflictError, DomainError
 from app.models import Batch, BatchMovement, Material, Recipe, User
 from app.models.enums import BatchStatus, JobStatus, MovementKind
@@ -17,7 +18,7 @@ from app.services import production as service
 from tests.factories import make_batch, make_material, make_recipe, make_user
 
 D = Decimal
-PLANNED_ON = date.today() + timedelta(days=3)
+PLANNED_ON = clock.today() + timedelta(days=3)
 
 
 @dataclass
@@ -114,7 +115,7 @@ async def test_draft_reserves_nothing(session):
 async def test_job_in_the_past_rejected(session):
     shop = await make_shop(session)
     data = JobCreateIn(
-        recipe_id=shop.recipe.id, quantity=1, planned_on=date.today() - timedelta(days=1)
+        recipe_id=shop.recipe.id, quantity=1, planned_on=clock.today() - timedelta(days=1)
     )
     with pytest.raises(DomainError, match="в прошлом"):
         await service.create_job(session, shop.user, data)

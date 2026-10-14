@@ -1,9 +1,8 @@
 """Демо-данные: всё, что требует ТЗ, на месте, и повторный запуск ничего не дублирует."""
 
-from datetime import date
-
 from sqlalchemy import func, select
 
+from app.core import clock
 from app.core.security import verify_password
 from app.models import Batch, Material, ProductionJob, Recipe, User
 from app.models.enums import BatchStatus, Currency, JobStatus, Role
@@ -48,10 +47,10 @@ async def test_seed_contains_everything_the_task_requires(session):
     assert {JobStatus.MARKED, JobStatus.IN_PROGRESS, JobStatus.PLANNED, JobStatus.DRAFT} <= statuses
     history = [j for j in jobs if j.status == JobStatus.MARKED]
     assert len(history) >= 20
-    assert min(j.completed_at.date() for j in history) < date.today().replace(day=1)
+    assert min(j.completed_at.date() for j in history) < clock.today().replace(day=1)
 
     # В «задания с сегодняшнего дня» попадают только задания текущей недели
-    upcoming = {j.status for j in jobs if j.planned_on and j.planned_on >= date.today()}
+    upcoming = {j.status for j in jobs if j.planned_on and j.planned_on >= clock.today()}
     assert upcoming <= {JobStatus.IN_PROGRESS, JobStatus.PLANNED, JobStatus.DRAFT}
 
     planned = [j for j in jobs if j.status == JobStatus.PLANNED]

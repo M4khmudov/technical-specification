@@ -13,6 +13,7 @@ from openpyxl import Workbook, load_workbook
 from app.assistant.code_interpreter import CodeInterpreterSession, mask_file
 from app.assistant.pii import Pseudonymizer
 from app.assistant.tools import ToolContext, default_registry
+from app.core import clock
 from app.core.errors import DomainError
 from app.llm.fake import ScriptedProvider
 from app.llm.registry import get_llm
@@ -74,7 +75,7 @@ async def test_consumption_dataset_matches_completed_job(session):
     job = await production.create_job(
         session,
         manager,
-        JobCreateIn(recipe_id=recipe.id, quantity=10, planned_on=date.today()),
+        JobCreateIn(recipe_id=recipe.id, quantity=10, planned_on=clock.today()),
         plan=True,
     )
     await production.start_job(session, manager, job.id)
@@ -157,7 +158,7 @@ async def test_export_tool_uploads_masked_file(session):
     session.add(supplier)
     await session.flush()
     wax = await make_material(session, code=f"CI-{uuid4().hex[:5]}")
-    await _receipt(session, manager, supplier, wax, day=date.today() - timedelta(days=3))
+    await _receipt(session, manager, supplier, wax, day=clock.today() - timedelta(days=3))
     provider = ScriptedProvider()
     pii = Pseudonymizer({manager.id: manager.full_name}, {supplier.id: supplier.name})
     ci = CodeInterpreterSession(provider, pii)
@@ -222,7 +223,7 @@ async def test_chart_from_exported_data(api, provider, session_factory):
     me = (await client.get("/api/auth/me")).json()
     async with session_factory() as s:
         user = await s.get(User, me["id"])
-        await _receipt(s, user, supplier, material, day=date.today() - timedelta(days=5))
+        await _receipt(s, user, supplier, material, day=clock.today() - timedelta(days=5))
 
     provider.push(
         ToolCallRequested(ToolCall("c1", "export_data", json.dumps({"dataset": "receipts"}))),

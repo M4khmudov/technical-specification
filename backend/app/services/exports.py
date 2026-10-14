@@ -15,6 +15,7 @@ from enum import StrEnum
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.errors import DomainError
 from app.models import (
     Batch,
@@ -74,7 +75,7 @@ def _week(d: date) -> date:
 
 
 def _period(date_from: date | None, date_to: date | None) -> tuple[date, date]:
-    date_to = date_to or date.today()
+    date_to = date_to or clock.today()
     date_from = date_from or date_to - timedelta(days=91)  # по умолчанию — квартал
     if date_from > date_to:
         raise DomainError("Начало периода позже конца")

@@ -53,10 +53,13 @@ export function fmtDateTime(value: string | null | undefined): string {
   })
 }
 
-export function todayIso(): string {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+// Мастерская работает по Москве (как бэкенд, настройка TIMEZONE): дата по умолчанию в
+// форме не должна зависеть от часового пояса компьютера пользователя
+export const WORKSHOP_TIMEZONE = 'Europe/Moscow'
+
+export function todayIso(now: Date = new Date()): string {
+  // формат sv-SE — ГГГГ-ММ-ДД
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: WORKSHOP_TIMEZONE }).format(now)
 }
 
 export const BATCH_STATUS: Record<string, string> = {

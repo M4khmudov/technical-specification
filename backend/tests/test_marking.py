@@ -10,6 +10,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
+from app.core import clock
 from app.core.config import get_settings
 from app.core.errors import PermissionDeniedError
 from app.models import AuditLog, MarkingReport, ProductionJob
@@ -185,7 +186,7 @@ async def test_two_workers_do_not_send_same_report_twice(session_factory):
         job = ProductionJob(
             recipe_id=recipe.id,
             quantity=1,
-            planned_on=date.today(),
+            planned_on=clock.today(),
             status=JobStatus.COMPLETED,
             created_by_id=user.id,
         )

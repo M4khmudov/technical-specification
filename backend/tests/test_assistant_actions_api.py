@@ -1,11 +1,12 @@
 """Сквозной сценарий через чат: модель предлагает действие → карточка → «Подтвердить»."""
 
 import json
-from datetime import date, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 
+from app.core import clock
 from app.llm.fake import ScriptedProvider, text_reply, tool_call_reply
 from app.llm.registry import get_llm
 from app.llm.router import LLMRouter, Route
@@ -14,7 +15,7 @@ from app.models import Recipe, RecipeItem
 from app.models.enums import Role
 from tests.test_chat import parse_sse
 
-PLANNED_ON = (date.today() + timedelta(days=3)).isoformat()
+PLANNED_ON = (clock.today() + timedelta(days=3)).isoformat()
 
 
 @pytest.fixture

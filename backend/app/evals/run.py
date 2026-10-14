@@ -31,6 +31,7 @@ from app.assistant.agent import ChatEvent
 from app.assistant.pii import load_pseudonymizer
 from app.assistant.tool_set import action_card
 from app.assistant.tools import default_registry
+from app.core import clock
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.evals.cases import CASES, Case
@@ -400,7 +401,7 @@ async def main(argv: list[str] | None = None, llm: LLMRouter | None = None) -> l
     args = parser.parse_args(argv)
 
     cases = [c for c in CASES if not args.case or c.id in args.case]
-    today = date.today()
+    today = clock.today()
     if args.dry_run:
         async with SessionLocal() as session:
             for case in cases:

@@ -22,6 +22,7 @@ import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock
 from app.core.config import get_settings
 from app.core.errors import DomainError
 from app.core.security import hash_password
@@ -380,7 +381,7 @@ async def _seed(session: AsyncSession, rates: RatesProvider) -> bool:
         users[Role.TECHNOLOGIST],
         users[Role.MANAGER],
     )
-    today = date.today()
+    today = clock.today()
     start = today - timedelta(days=today.weekday()) - timedelta(weeks=HISTORY_WEEKS)
 
     # События истории в хронологическом порядке: поступления и еженедельные задания

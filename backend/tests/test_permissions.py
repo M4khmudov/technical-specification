@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
+from app.core import clock
 from app.core.errors import NotFoundError, PermissionDeniedError
 from app.models import ProductionJob
 from app.models.enums import Currency, Role
@@ -18,7 +19,7 @@ from tests.factories import make_material, make_recipe, make_user
 from tests.fakes import FakeRates
 
 MISSING = 999_999
-FUTURE = date.today() + timedelta(days=2)
+FUTURE = clock.today() + timedelta(days=2)
 
 # Операция → вызов с несуществующими id. Если право есть, сервис дойдёт до поиска
 # и ответит «не найдено»; если нет — «Недостаточно прав» раньше любых чтений.

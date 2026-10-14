@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from app.core import clock
 from app.core.errors import ConflictError, DomainError, ExternalServiceError, NotFoundError
 from app.models import AuditLog, Batch, BatchMovement
 from app.models.enums import BatchStatus, Currency, MovementKind
@@ -101,7 +102,7 @@ async def test_future_receipt_rejected(session):
     material = await make_material(session)
     data = ReceiptIn(
         supplier_id=supplier.id,
-        received_on=date.today() + timedelta(days=1),
+        received_on=clock.today() + timedelta(days=1),
         lines=[line(material)],
     )
     with pytest.raises(DomainError, match="в будущем"):
