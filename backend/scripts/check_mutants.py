@@ -7,16 +7,30 @@
 коде) — место, которое тесты не защищают; скрипт тогда завершается с кодом 1.
 """
 
-import subprocess
+import subprocess  # noqa: S404 — запускаем свой же pytest
 import sys
 from pathlib import Path
 
+BATCH_QUERY_END = (
+    "        .execution_options(populate_existing=True)\n"
+    "    )\n"
+    "    return list((await session.scalars(stmt)).all())"
+)
+LOCK = "        .with_for_update()\n"
+CLAIM = (
+    "    action.status = ActionStatus.CONFIRMED\n"
+    "    action.decided_at = _now()\n"
+    "    await session.commit()\n"
+    "    try:"
+)
+
+# (что сломано, файл, было, стало, какие тесты должны упасть)
 MUTANTS = [
     (
         "снята блокировка партий при резерве",
         "app/services/production.py",
-        "        .with_for_update()\n        .execution_options(populate_existing=True)\n    )\n    return list((await session.scalars(stmt)).all())",
-        "        .execution_options(populate_existing=True)\n    )\n    return list((await session.scalars(stmt)).all())",
+        LOCK + BATCH_QUERY_END,
+        BATCH_QUERY_END,
         "tests/test_guards.py -k locked_batch",
     ),
     (
@@ -29,8 +43,8 @@ MUTANTS = [
     (
         "снят populate_existing у партий",
         "app/services/production.py",
-        "        .with_for_update()\n        .execution_options(populate_existing=True)\n    )\n    return list((await session.scalars(stmt)).all())",
-        "        .with_for_update()\n    )\n    return list((await session.scalars(stmt)).all())",
+        LOCK + BATCH_QUERY_END,
+        LOCK + "    )\n    return list((await session.scalars(stmt)).all())",
         "tests/test_guards.py -k stale",
     ),
     (
@@ -78,8 +92,8 @@ MUTANTS = [
     (
         "дедупликация памяти без user_id",
         "app/services/memory.py",
-        "select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.normalized == key)",
-        "select(UserMemory).where(UserMemory.normalized == key)",
+        "UserMemory.user_id == user.id, UserMemory.normalized == key",
+        "UserMemory.normalized == key",
         "tests/test_guards.py -k two_users",
     ),
     (
@@ -92,32 +106,38 @@ MUTANTS = [
     (
         "подтверждение без захвата предложения",
         "app/services/actions.py",
-        "    action.status = ActionStatus.CONFIRMED\n    action.decided_at = _now()\n    await session.commit()\n    try:",
+        CLAIM,
         "    try:",
         "tests/test_tools.py -k concurrent",
     ),
 ]
 
-failed = []
-for name, path, old, new, target in MUTANTS:
-    p = Path(path)
-    original = p.read_text(encoding="utf-8")
-    assert old in original, f"{name}: шаблон не найден"
-    p.write_text(original.replace(old, new, 1), encoding="utf-8", newline="\n")
+
+def run(name: str, path: str, old: str, new: str, target: str) -> bool:
+    """Внести ошибку, прогнать тесты, вернуть код. True — тесты ошибку поймали."""
+    file = Path(path)
+    original = file.read_text(encoding="utf-8")
+    if old not in original:
+        raise SystemExit(f"{name}: шаблон не найден в {path} — обновите скрипт")
+    file.write_text(original.replace(old, new, 1), encoding="utf-8", newline="\n")
     try:
-        r = subprocess.run(
+        result = subprocess.run(  # noqa: S603 — фиксированные аргументы
             [sys.executable, "-m", "pytest", "-q", "-x", *target.split()],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
+            check=False,
         )
     finally:
-        p.write_text(original, encoding="utf-8", newline="\n")
-    caught = r.returncode != 0
-    print(
-        f"{'ПОЙМАН ' if caught else 'ВЫЖИЛ  '} {name}: {r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ''}"
-    )
-    if not caught:
-        failed.append(name)
-sys.exit(1 if failed else 0)
+        file.write_text(original, encoding="utf-8", newline="\n")
+    lines = result.stdout.strip().splitlines()
+    caught = result.returncode != 0
+    print(f"{'ПОЙМАН' if caught else 'ВЫЖИЛ '}  {name}: {lines[-1] if lines else ''}")
+    return caught
+
+
+if __name__ == "__main__":
+    survived = [m[0] for m in MUTANTS if not run(*m)]
+    print(f"\nПоймано {len(MUTANTS) - len(survived)} из {len(MUTANTS)}")
+    sys.exit(1 if survived else 0)
