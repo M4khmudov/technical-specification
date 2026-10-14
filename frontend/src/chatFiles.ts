@@ -32,3 +32,18 @@ export async function downloadChatFile(url: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000)
 }
 
+
+// Картинки, вставленные в ответ как картинки (![…](url)). Обычная ссылка [скачать](url)
+// картинку не показывает — такой график надо показать под ответом.
+export function imagesInText(content: string, files: ChatFileData[]): Set<string> {
+  return new Set(files.filter((f) => isImageEmbed(content, f.url)).map((f) => f.url))
+}
+
+function isImageEmbed(content: string, url: string): boolean {
+  const target = `](${url})`
+  for (let at = content.indexOf(target); at !== -1; at = content.indexOf(target, at + 1)) {
+    const open = content.lastIndexOf('[', at)
+    if (open > 0 && content[open - 1] === '!') return true
+  }
+  return false
+}

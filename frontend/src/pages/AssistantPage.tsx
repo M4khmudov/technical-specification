@@ -9,7 +9,7 @@ import { streamAnswer } from '../chatStream'
 import ActionCard from '../components/ActionCard'
 import { useConfirm } from '../useConfirm'
 import MemoryPanel from '../components/MemoryPanel'
-import { downloadChatFile, isChatFileUrl } from '../chatFiles'
+import { downloadChatFile, imagesInText, isChatFileUrl } from '../chatFiles'
 import type { ChatFileData, CodeRun } from '../chatFiles'
 import { AuthImage, CodeRuns, FileChip, GeneratedFiles } from '../components/ChatFiles'
 import { PaperclipIcon } from '../components/Icons'
@@ -84,8 +84,9 @@ function ToolChips({ tools }: { tools: ToolRecord[] }) {
 function AssistantMessage({ message }: { message: Message }) {
   const failed = ['stopped', 'interrupted', 'error'].includes(message.status)
   const files = message.files ?? []
-  // картинки, уже вставленные в текст ответа, второй раз не показываем
-  const shownInText = new Set(files.filter((f) => message.content.includes(`(${f.url})`)).map((f) => f.url))
+  // картинки, вставленные в текст как картинки, второй раз не показываем; график,
+  // на который в тексте только ссылка, показываем под ответом
+  const shownInText = imagesInText(message.content, files)
   // Актуальный статус действий приходит с сервером; во время потока — из событий инструментов
   const cards: ActionCardData[] =
     message.actions && message.actions.length > 0
@@ -99,9 +100,15 @@ function AssistantMessage({ message }: { message: Message }) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                // Файлы Code Interpreter отдаются только с токеном
+                // Файлы Code Interpreter отдаются только с токеном. Картинки с внешних адресов
+                // не загружаем: браузер сам отправил бы запрос, а в адрес после обратной
+                // замены псевдонимов могли попасть настоящие имена
                 img: ({ src, alt }) =>
-                  isChatFileUrl(typeof src === 'string' ? src : undefined) ? <AuthImage src={src as string} alt={alt} /> : <img src={src as string} alt={alt ?? ''} />,
+                  isChatFileUrl(typeof src === 'string' ? src : undefined) ? (
+                    <AuthImage src={src as string} alt={alt} />
+                  ) : (
+                    <span className="text-xs text-stone-500">[внешнее изображение не показывается]</span>
+                  ),
                 a: ({ href, children }) =>
                   isChatFileUrl(href) ? (
                     <a
