@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from app.assistant.pii import Pseudonymizer, StreamUnmasker
+from app.assistant.pii import Pseudonymizer, StreamUnmasker, mask_data
 from app.assistant.tools import ToolContext, ToolRegistry
 from app.llm.router import LLMRouter
 from app.llm.types import (
@@ -143,9 +143,11 @@ async def run_turn(
             }
             state.tools.append(record)
             yield ChatEvent("tool", {**record, "status": "finished"})
-            output = json.dumps(tidy_numbers(outcome.output), ensure_ascii=False, default=str)
+            data = tidy_numbers(outcome.output)
+            data = mask_data(pii, data) if pii else data
+            output = json.dumps(data, ensure_ascii=False, default=str)
             items.append(call)  # в истории для модели — как она его прислала (с псевдонимами)
-            items.append(ToolResult(call.call_id, pii.mask(output) if pii else output))
+            items.append(ToolResult(call.call_id, output))
 
     state.text.append(STEP_LIMIT_NOTE)
     yield ChatEvent("delta", {"text": STEP_LIMIT_NOTE})

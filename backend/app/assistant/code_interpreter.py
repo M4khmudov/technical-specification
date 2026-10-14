@@ -9,11 +9,15 @@
 обратно на настоящие имена; ссылки «sandbox:/mnt/data/…» в ответе — на наши адреса.
 """
 
+import codecs
 import io
 import logging
 import mimetypes
 import re
+import zipfile
 from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import PurePosixPath
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +41,11 @@ MAX_GENERATED_BYTES = 10 * 1024 * 1024
 SANDBOX_LINK = re.compile(r"sandbox:(/mnt/data/[^\s)\]\"']+)")
 
 
+# Предел распакованного XLSX: архив в 100 КБ может раскрыться в гигабайты («zip-бомба»)
+MAX_XLSX_UNPACKED_BYTES = 50 * 1024 * 1024
+MAX_XLSX_CELLS = 500_000
+
+
 def validate_upload(filename: str, data: bytes) -> str:
     suffix = PurePosixPath(filename).suffix.lower()
     if suffix not in UPLOAD_TYPES:
@@ -45,16 +54,60 @@ def validate_upload(filename: str, data: bytes) -> str:
         raise DomainError("Файл пустой")
     if len(data) > MAX_UPLOAD_BYTES:
         raise DomainError("Файл больше 5 МБ")
+    if suffix == ".xlsx":
+        _check_xlsx_size(data)
     return UPLOAD_TYPES[suffix]
 
 
+def _check_xlsx_size(data: bytes) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            unpacked = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile as exc:
+        raise DomainError("Не удалось прочитать файл Excel") from exc
+    if unpacked > MAX_XLSX_UNPACKED_BYTES:
+        raise DomainError("Файл Excel слишком большой после распаковки (больше 50 МБ)")
+
+
+# Кодировки CSV: UTF-8 (с BOM и без), UTF-16 (Excel «Юникод-текст»), Windows-1251
+_BOMS = [
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+]
+
+
 def _decode(data: bytes) -> str:
-    for encoding in ("utf-8-sig", "cp1251"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    raise DomainError("Не удалось прочитать CSV: неизвестная кодировка")
+    """Текст CSV. Если кодировку не распознать — отказ, а не «как есть»: иначе имена
+    в непрочитанном тексте ушли бы провайдеру без замены."""
+    for bom, encoding in _BOMS:
+        if data.startswith(bom):
+            return _strict(data, encoding)
+    if b"\x00" in data:
+        # UTF-16 без BOM: нулевые байты на месте старших байтов кириллицы и латиницы
+        even_zeros = data[0::2].count(0)
+        odd_zeros = data[1::2].count(0)
+        return _strict(data, "utf-16-be" if even_zeros > odd_zeros else "utf-16-le")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    text = _strict(data, "cp1251")
+    if sum(ch.isprintable() or ch in "\r\n\t" for ch in text) < len(text) * 0.95:
+        raise DomainError("Не удалось прочитать CSV: неизвестная кодировка")
+    return text
+
+
+def _strict(data: bytes, encoding: str) -> str:
+    try:
+        text = data.decode(encoding)
+    except UnicodeDecodeError as exc:
+        raise DomainError("Не удалось прочитать CSV: неизвестная кодировка") from exc
+    if "\x00" in text:
+        raise DomainError("Не удалось прочитать CSV: неизвестная кодировка")
+    return text
 
 
 def mask_file(filename: str, data: bytes, pii: Pseudonymizer | None) -> bytes:
@@ -65,8 +118,48 @@ def mask_file(filename: str, data: bytes, pii: Pseudonymizer | None) -> bytes:
     if suffix in TEXT_SUFFIXES:
         return pii.mask(_decode(data)).encode("utf-8")
     if suffix == ".xlsx":
-        return _map_xlsx(data, pii.mask)
+        return _clean_xlsx(data, pii.mask)
     return data
+
+
+def _clean_xlsx(data: bytes, mask) -> bytes:
+    """Новая книга только из значений ячеек — с псевдонимами.
+
+    Править исходный файл ненадёжно: имена живут и вне ячеек — в свойствах документа
+    (автор, кто изменил), комментариях и их авторах, колонтитулах, именованных
+    диапазонах. Поэтому переносим только листы и значения; формула заменяется
+    сохранённым результатом, а если его нет — текстом формулы с псевдонимами."""
+    from openpyxl import Workbook, load_workbook
+
+    try:
+        formulas = load_workbook(io.BytesIO(data))
+        values = load_workbook(io.BytesIO(data), data_only=True)
+    except Exception as exc:  # noqa: BLE001 — повреждённый или не тот формат
+        raise DomainError("Не удалось прочитать файл Excel") from exc
+    clean = Workbook()
+    clean.remove(clean.active)
+    cells = 0
+    for sheet, cached in zip(formulas.worksheets, values.worksheets, strict=True):
+        target = clean.create_sheet(mask(sheet.title)[:31])
+        for row in sheet.iter_rows():
+            for cell in row:
+                value = cell.value
+                if value is None:
+                    continue
+                cells += 1
+                if cells > MAX_XLSX_CELLS:
+                    raise DomainError("В файле Excel слишком много ячеек")
+                if isinstance(value, str) and value.startswith("="):
+                    result = cached[cell.coordinate].value
+                    value = result if result is not None else value
+                if isinstance(value, str):
+                    value = mask(value)
+                elif not isinstance(value, int | float | Decimal | date | datetime | bool):
+                    value = mask(str(value))
+                target.cell(row=cell.row, column=cell.column, value=value)
+    buffer = io.BytesIO()
+    clean.save(buffer)
+    return buffer.getvalue()
 
 
 def unmask_file(filename: str, data: bytes, pii: Pseudonymizer | None) -> bytes:

@@ -33,8 +33,59 @@ SURNAME_ENDINGS = ["", "а", "у", "ым", "ом", "е", "ой", "ою", "ы", "
 NAME_ENDINGS_HARD = ["", "а", "у", "ом", "ем", "е", "ы", "ой"]
 NAME_ENDINGS_SOFT = ["я", "и", "ю", "ей", "е", "а", "ы", "у", "ой"]
 
-B = r"(?<![\w-])"  # граница слова слева (дефис — часть псевдонима)
-E = r"(?![\w-])"
+# Граница слова: буква или цифра рядом — продолжение слова; подчёркивание — нет
+# («Петров_отчёт.xlsx»); дефис — часть псевдонима
+B = r"(?<![^\W_])(?<!-)"
+E = r"(?![^\W_])(?!-)"
+JOIN = r"[\s\-_]*"  # между словами названия: пробел, дефис, подчёркивание или слитно
+
+# Транслитерация («Petrov_report.csv», «Voskovoy dvor»): варианты для каждой буквы
+TRANSLIT = {
+    "а": "a",
+    "б": "b",
+    "в": "v|w",
+    "г": "g",
+    "д": "d",
+    "е": "e|ye",
+    "ё": "e|yo|jo",
+    "ж": "zh|j",
+    "з": "z",
+    "и": "i",
+    "й": "y|i|j",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh|h|x",
+    "ц": "ts|c|tz",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "shch|sch",
+    "ъ": "",
+    "ы": "y|i",
+    "ь": "",
+    "э": "e",
+    "ю": "yu|iu|ju",
+    "я": "ya|ia|ja",
+}
+TRANSLIT_ENDINGS = r"(?:a|u|y|om|e|oy|oi|ym|ой)?"
+
+
+def _translit(word: str) -> str | None:
+    """Шаблон латинского написания русского слова; None — слово не кириллическое."""
+    if not re.fullmatch(r"[а-яё]+", word.lower()):
+        return None
+    return "".join(
+        f"(?:{TRANSLIT[ch]})?" if TRANSLIT[ch] == "" else f"(?:{TRANSLIT[ch]})"
+        for ch in word.lower()
+    )
 
 
 def _alt(items: list[str]) -> str:
@@ -92,8 +143,12 @@ def person_patterns(full_name: str) -> list[str]:
         f"{f}{ws}{s}",  # Иван Петров
         f"{s}{ws}{fi}",  # Петрову И.
         f"{fi}{opt_ws}{s}",  # И. Петров
-        s,  # Петров, Петрову
+        # Петров, Петрову — но не «Петрова Ольга» и не «Петрова О.»: это другой человек
+        s + r"(?!\s+(?-i:[А-ЯЁ])(?:(?-i:[а-яё])+|\.))",
     ]
+    latin = _translit(parts[0])
+    if latin:
+        patterns.append(latin + TRANSLIT_ENDINGS)  # Petrov, Petrova
     return patterns
 
 
@@ -111,7 +166,7 @@ def supplier_patterns(name: str) -> list[str]:
     words = _core_words(name)
     if not words:
         return [re.escape(name)]
-    if _looks_like_person(words):  # ИП Смирнова Ольга Викторовна
+    if re.search(r"(?<!\w)ИП(?!\w)", name) and _looks_like_person(words):  # ИП Смирнова О. В.
         persons = person_patterns(" ".join(words))
         legal = rf"(?:{LEGAL_FORMS}\s+)?"
         return [legal + p for p in persons]
@@ -123,11 +178,15 @@ def supplier_patterns(name: str) -> list[str]:
             core_parts.append(re.escape(w) + r"[а-яё]{0,3}")
         else:
             core_parts.append(re.escape(w))
-    core = r"[\s\-]+".join(core_parts)
-    q = f"[{QUOTES}]?"
-    prefix = rf"(?:{LEGAL_FORMS}\s*{q}\s*)?"
-    suffix = rf"(?:\s*{q}\s*,?\s*{LEGAL_FORMS})?"
-    return [rf"{prefix}{q}{core}{q}{suffix}"]
+    core = JOIN.join(core_parts)
+    quoted = rf"(?:[«\"„“']{core}[»\"“”'])"
+    prefix = rf"(?:{LEGAL_FORMS}\s*)?"
+    suffix = rf"(?:\s*,?\s*{LEGAL_FORMS})?"
+    patterns = [rf"{prefix}(?:{quoted}|{core}){suffix}"]
+    latin = [_translit(w) for w in words]
+    if all(latin):
+        patterns.append(JOIN.join(latin))  # Voskovoy dvor
+    return patterns
 
 
 @dataclass(frozen=True)
@@ -232,6 +291,18 @@ async def load_pseudonymizer(session) -> Pseudonymizer:
     employees = dict((await session.execute(select(User.id, User.full_name))).all())
     suppliers = dict((await session.execute(select(Supplier.id, Supplier.name))).all())
     return Pseudonymizer(employees, suppliers)
+
+
+def mask_data(pii: Pseudonymizer, value):
+    """Псевдонимы в результате инструмента — по каждому строковому значению, чтобы
+    замена не могла задеть кавычки и скобки JSON."""
+    if isinstance(value, str):
+        return pii.mask(value)
+    if isinstance(value, dict):
+        return {k: mask_data(pii, v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [mask_data(pii, v) for v in value]
+    return value
 
 
 def mask_items(pii: Pseudonymizer, items: list) -> list:
