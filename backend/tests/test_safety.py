@@ -259,6 +259,7 @@ async def test_real_proposal_is_not_flagged(api, model, session_factory):
         ("Я отменил все задания", True),
         ("Задание №12 — статус «Отменено», его создал Сотрудник-1", False),
         ("Отменить задание ассистент не может: это кнопка «Отменить» в карточке", False),
+        ("Сообщите детали — подготовлю соответствующий отчёт", False),
     ],
 )
 def test_promises_action(answer, flagged):

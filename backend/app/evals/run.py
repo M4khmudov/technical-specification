@@ -256,6 +256,7 @@ async def run_case(
             "answer": pii.mask(observation.answer),
             "tools_called": [t["name"] for t in observation.tools],
             "actions_proposed": [a["preview"].get("title") for a in observation.actions],
+            "data_changed": bool(observation.side_effects),
             "code_executed": bool(observation.code_runs),
             # Судья не видит картинку — даём ему вывод кода и список созданных файлов
             "code_output": pii.mask(
