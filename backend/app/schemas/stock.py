@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.enums import BatchStatus, Currency, MovementKind
 
 PositiveQty = Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=3)]
-NonNegativePrice = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=6)]
+# Предел цены за единицу: с любым курсом себестоимость в рублях помещается в Numeric(16, 6)
+NonNegativePrice = Annotated[Decimal, Field(ge=0, le=1_000_000, max_digits=16, decimal_places=6)]
 
 
 class ReceiptLineIn(BaseModel):

@@ -5,7 +5,8 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.errors import DomainError
 
@@ -71,6 +72,23 @@ def _field(loc: tuple) -> str:
     return " → ".join(parts) or "Запрос"
 
 
+DATA_ERROR = "Проверьте данные: слишком большое число или недопустимое значение"
+DATA_ERRORS = {
+    "22003": "Проверьте данные: число слишком большое",
+    "22021": "Проверьте данные: в тексте недопустимый символ",
+    "22P05": "Проверьте данные: в тексте недопустимый символ",
+}
+HTTP_ERRORS = {
+    404: "Адрес не найден",
+    405: "Этот метод для адреса не поддерживается",
+}
+
+
+def _sqlstate(exc: DBAPIError) -> str | None:
+    orig = exc.orig
+    return getattr(orig, "sqlstate", None) or getattr(orig.__cause__, "sqlstate", None)
+
+
 def install(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def domain_error(_: Request, exc: DomainError) -> JSONResponse:
@@ -102,6 +120,22 @@ def install(app: FastAPI) -> None:
             },
             status_code=409,
         )
+
+    @app.exception_handler(DBAPIError)
+    async def data_error(request: Request, exc: DBAPIError) -> JSONResponse:
+        # Класс 22 — «некорректные данные»: число не помещается в колонку, номер больше
+        # int32, символ NUL в тексте. Это ошибка ввода, а не сервера
+        state = _sqlstate(exc)
+        if state is None or not state.startswith("22"):
+            return await unexpected_error(request, exc)
+        logger.info("rejected input: sqlstate=%s", state)
+        return JSONResponse({"detail": DATA_ERRORS.get(state, DATA_ERROR)}, status_code=422)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # Ответы самого фреймворка (нет адреса, не тот метод) — тоже по-русски
+        detail = HTTP_ERRORS.get(exc.status_code, exc.detail)
+        return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
 
     @app.exception_handler(Exception)
     async def unexpected_error(_: Request, exc: Exception) -> JSONResponse:

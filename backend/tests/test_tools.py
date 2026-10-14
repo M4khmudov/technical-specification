@@ -263,7 +263,9 @@ async def _committed_proposal(session_factory) -> tuple:
 async def _jobs_of(session_factory, recipe) -> int:
     async with session_factory() as s:
         return await s.scalar(
-            select(func.count()).select_from(ProductionJob).where(ProductionJob.recipe_id == recipe.id)
+            select(func.count())
+            .select_from(ProductionJob)
+            .where(ProductionJob.recipe_id == recipe.id)
         )
 
 
