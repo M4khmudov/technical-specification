@@ -4,8 +4,8 @@ from sqlalchemy import func, select
 
 from app.core import clock
 from app.core.security import verify_password
-from app.models import Batch, Material, ProductionJob, Recipe, User
-from app.models.enums import BatchStatus, Currency, JobStatus, Role
+from app.models import Batch, MarkingAttempt, MarkingReport, Material, ProductionJob, Recipe, User
+from app.models.enums import BatchStatus, Currency, JobStatus, MarkingStatus, Role
 from app.seed import DEMO_PASSWORD, MATERIALS, seed
 from app.services import production
 from tests.fakes import FakeRates
@@ -44,10 +44,28 @@ async def test_seed_contains_everything_the_task_requires(session):
         )
     ).all()
     statuses = {j.status for j in jobs}
-    assert {JobStatus.MARKED, JobStatus.IN_PROGRESS, JobStatus.PLANNED, JobStatus.DRAFT} <= statuses
-    history = [j for j in jobs if j.status == JobStatus.MARKED]
+    assert {
+        JobStatus.COMPLETED,
+        JobStatus.IN_PROGRESS,
+        JobStatus.PLANNED,
+        JobStatus.DRAFT,
+    } <= statuses
+    history = [j for j in jobs if j.status == JobStatus.COMPLETED]
     assert len(history) >= 20
     assert min(j.completed_at.date() for j in history) < clock.today().replace(day=1)
+    # S5: отчёты маркировки отправит воркер по-настоящему; выдуманных попыток сид не пишет
+    ids = [j.id for j in history]
+    reports = (
+        await session.scalars(select(MarkingReport).where(MarkingReport.job_id.in_(ids)))
+    ).all()
+    assert len(reports) == len(history)
+    assert all(r.status == MarkingStatus.PENDING for r in reports)
+    attempts = await session.scalar(
+        select(func.count())
+        .select_from(MarkingAttempt)
+        .where(MarkingAttempt.report_id.in_([r.id for r in reports]))
+    )
+    assert attempts == 0
 
     # В «задания с сегодняшнего дня» попадают только задания текущей недели
     upcoming = {j.status for j in jobs if j.planned_on and j.planned_on >= clock.today()}

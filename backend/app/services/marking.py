@@ -15,6 +15,7 @@
    но мы не дождались ответа, повтор вернёт тот же отчёт, а не создаст дубль.
 """
 
+import asyncio
 import logging
 import random
 import time
@@ -36,6 +37,9 @@ from app.services import audit
 logger = logging.getLogger(__name__)
 
 RETRYABLE_4XX = {408, 425, 429}
+# Сколько ждать Redis при постановке в очередь: завершение задания не должно висеть,
+# если Redis недоступен, — отчёт всё равно подберёт периодическая задача
+ENQUEUE_TIMEOUT_SECONDS = 1.0
 _random = random.Random()  # noqa: S311 — джиттер, не криптография
 
 
@@ -81,16 +85,22 @@ async def enqueue(report_id: int) -> None:
     if not get_settings().marking_enqueue_enabled:
         return
     try:
-        from arq import create_pool
-        from arq.connections import RedisSettings
-
-        pool = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
-        try:
-            await pool.enqueue_job("send_marking_report", report_id)
-        finally:
-            await pool.aclose()
+        await asyncio.wait_for(_enqueue(report_id), ENQUEUE_TIMEOUT_SECONDS)
     except Exception:  # noqa: BLE001 — отчёт подберёт периодическая задача
         logger.warning("marking report %s not enqueued, will be picked up by cron", report_id)
+
+
+async def _enqueue(report_id: int) -> None:
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    redis = RedisSettings.from_dsn(get_settings().redis_url)
+    redis.conn_timeout, redis.conn_retries = 1, 0  # без долгих переподключений
+    pool = await create_pool(redis)
+    try:
+        await pool.enqueue_job("send_marking_report", report_id)
+    finally:
+        await pool.aclose()
 
 
 # ---------------------------------------------------------------- отправка
@@ -120,6 +130,12 @@ async def send_report(session: AsyncSession, report_id: int, client: MarkingClie
         status = report.status.value  # после rollback объект истекает — читаем до
         await session.rollback()
         return status
+    if report.next_attempt_at is not None and report.next_attempt_at > _now():
+        # Пауза перед повтором ещё не прошла. Отправку запускают два пути (отложенная
+        # задача и периодическая), и без этой проверки повтор уходил через доли секунды,
+        # а лимит попыток сгорал досрочно
+        await session.rollback()
+        return "not_due"
 
     attempt_no = report.attempts_count + 1
     started = _now()
@@ -156,7 +172,8 @@ async def send_report(session: AsyncSession, report_id: int, client: MarkingClie
     )
     report.attempts_count = attempt_no
 
-    if outcome == "retry" and attempt_no >= settings.marking_max_attempts:
+    limit = report.attempts_limit or settings.marking_max_attempts
+    if outcome == "retry" and attempt_no >= limit:
         outcome = "failed"
     if outcome == "sent":
         report.status = MarkingStatus.SENT
@@ -228,6 +245,8 @@ async def retry_failed(session: AsyncSession, actor: User, job_id: int) -> Marki
         raise ConflictError("Повторить можно только отчёт, отправка которого не удалась")
     report.status = MarkingStatus.PENDING
     report.next_attempt_at = _now()
+    # Новый круг из marking_max_attempts попыток с паузами, а не одна попытка
+    report.attempts_limit = report.attempts_count + get_settings().marking_max_attempts
     audit.record(session, actor, "marking_report", report.id, "retry")
     await session.commit()
     return report

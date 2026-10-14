@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core import clock
 from app.core.config import get_settings
@@ -60,6 +60,16 @@ def no_jitter(monkeypatch):
     monkeypatch.setattr(marking._random, "uniform", lambda a, b: 1.0)
 
 
+async def pause_passed(session, report_id: int) -> None:
+    """Время следующей попытки наступило (вместо реального ожидания паузы)."""
+    await session.execute(
+        update(MarkingReport)
+        .where(MarkingReport.id == report_id)
+        .values(next_attempt_at=datetime.now(UTC) - timedelta(seconds=1))
+    )
+    await session.commit()
+
+
 async def completed_job(session):
     shop = await make_shop(session)
     shop.user.full_name = "Петров Иван Сергеевич"
@@ -108,6 +118,7 @@ async def test_retry_after_lost_response_does_not_create_duplicate(session):
     service = FakeMarkingService("timeout", "ok")
 
     assert await marking.send_report(session, report.id, service.client()) == "retry"
+    await pause_passed(session, report.id)
     assert await marking.send_report(session, report.id, service.client()) == "sent"
 
     assert len(service.keys_seen) == 2
@@ -124,6 +135,7 @@ async def test_server_errors_are_retried_with_growing_pause(session):
     service = FakeMarkingService("500", "500", "500")
     pauses = []
     for _ in range(3):
+        await pause_passed(session, report.id)
         before = datetime.now(UTC)
         assert await marking.send_report(session, report.id, service.client()) == "retry"
         report = await marking.get_report(session, job.id)
@@ -156,6 +168,7 @@ async def test_gives_up_after_max_attempts_then_manager_can_retry(session, monke
     service = FakeMarkingService("500", "500", "ok")
 
     assert await marking.send_report(session, report.id, service.client()) == "retry"
+    await pause_passed(session, report.id)
     assert await marking.send_report(session, report.id, service.client()) == "failed"
 
     storekeeper = await make_user(session, role=Role.STOREKEEPER)
@@ -166,6 +179,46 @@ async def test_gives_up_after_max_attempts_then_manager_can_retry(session, monke
     assert report.status == MarkingStatus.PENDING
     assert await marking.send_report(session, report.id, service.client()) == "sent"
     assert len(set(service.keys_seen)) == 1
+
+
+async def test_retry_waits_for_its_pause(session):
+    """S5: повтор не уходит раньше времени, кто бы его ни запустил — отложенная задача
+    или периодическая."""
+    _, job, report = await completed_job(session)
+    report_id = report.id
+    service = FakeMarkingService("500", "ok")
+    assert await marking.send_report(session, report_id, service.client()) == "retry"
+    assert await marking.send_report(session, report_id, service.client()) == "not_due"
+    assert len(service.keys_seen) == 1
+    assert len(await marking.list_attempts(session, report_id)) == 1
+
+
+async def test_manual_retry_starts_a_full_round(session, monkeypatch):
+    """S5: после ручного повтора — снова marking_max_attempts попыток, а не одна."""
+    monkeypatch.setattr(get_settings(), "marking_max_attempts", 2)
+    shop, job, report = await completed_job(session)
+    service = FakeMarkingService("500", "500", "500", "500")
+    assert await marking.send_report(session, report.id, service.client()) == "retry"
+    await pause_passed(session, report.id)
+    assert await marking.send_report(session, report.id, service.client()) == "failed"
+
+    await marking.retry_failed(session, shop.user, job.id)
+    assert await marking.send_report(session, report.id, service.client()) == "retry"
+    await pause_passed(session, report.id)
+    assert await marking.send_report(session, report.id, service.client()) == "failed"
+    assert [a.attempt_no for a in await marking.list_attempts(session, report.id)] == [1, 2, 3, 4]
+
+
+async def test_enqueue_does_not_hang_when_redis_is_down(monkeypatch):
+    """S5: «Завершить» не ждёт недоступный Redis."""
+    import time
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "marking_enqueue_enabled", True)
+    monkeypatch.setattr(settings, "redis_url", "redis://10.255.255.1:6379/0")  # не отвечает
+    started = time.monotonic()
+    await marking.enqueue(1)
+    assert time.monotonic() - started < 2
 
 
 async def test_due_reports_are_picked_up(session):

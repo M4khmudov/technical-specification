@@ -31,7 +31,6 @@ from app.models import (
     AuditLog,
     Batch,
     BatchMovement,
-    MarkingAttempt,
     MarkingReport,
     Material,
     ProductionJob,
@@ -41,7 +40,7 @@ from app.models import (
     Supplier,
     User,
 )
-from app.models.enums import Currency, JobStatus, MarkingStatus, Role
+from app.models.enums import Currency, Role
 from app.schemas.production import ActualIn, JobCompleteIn, JobCreateIn
 from app.schemas.stock import ReceiptIn, ReceiptLineIn
 from app.services import batches, production
@@ -271,26 +270,11 @@ async def backdate_job(session: AsyncSession, job_id: int, day: date) -> None:
         .where(AuditLog.entity_type == "job", AuditLog.entity_id == job_id)
         .values(created_at=completed)
     )
-    # Историческим отчётам маркировки ставим «доставлено», чтобы воркер их не слал
+    # Отчёты маркировки исторических заданий отправит воркер — по-настоящему, через мок
+    # сервиса (с его отказами и повторами). Выдуманных «успешных» попыток сид не пишет
     report = await session.scalar(select(MarkingReport).where(MarkingReport.job_id == job_id))
     if report is not None:
-        report.status = MarkingStatus.SENT
-        report.sent_at = completed + timedelta(minutes=1)
-        report.next_attempt_at = None
-        report.attempts_count = 1
         report.created_at = completed
-        session.add(
-            MarkingAttempt(
-                report_id=report.id,
-                attempt_no=1,
-                started_at=completed + timedelta(minutes=1),
-                duration_ms=120,
-                http_status=200,
-            )
-        )
-        await session.execute(
-            update(ProductionJob).where(ProductionJob.id == job_id).values(status=JobStatus.MARKED)
-        )
     await session.commit()
 
 

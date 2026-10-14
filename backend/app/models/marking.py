@@ -25,6 +25,9 @@ class MarkingReport(Base):
         str_enum(MarkingStatus, "marking_status"), default=MarkingStatus.PENDING
     )
     attempts_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    # Последняя попытка текущего круга (None — marking_max_attempts). Ручной повтор
+    # открывает новый круг: attempts_count + marking_max_attempts
+    attempts_limit: Mapped[int | None]
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[CreatedAt]
