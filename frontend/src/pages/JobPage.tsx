@@ -279,7 +279,7 @@ export default function JobPage() {
                   <td className="whitespace-nowrap py-2 pr-4 text-right">{fmtQty(m.actual_qty, m.unit)}</td>
                   {active && (
                     <td className="py-2">
-                      <TrafficLight light={m.light} />
+                      <TrafficLight light={m.light} draft={job.status === 'draft'} />
                     </td>
                   )}
                 </tr>

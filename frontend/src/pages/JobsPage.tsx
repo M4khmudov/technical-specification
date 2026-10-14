@@ -175,8 +175,10 @@ export default function JobsPage() {
                 </td>
                 <td className="px-3 py-2">
                   {j.has_deficit ? (
-                    <span className="text-red-700">Дефицит</span>
-                  ) : ['draft', 'planned', 'in_progress'].includes(j.status) ? (
+                    <span className="text-red-700">{j.status === 'draft' ? 'Не хватит на складе' : 'Дефицит'}</span>
+                  ) : j.status === 'draft' ? (
+                    <span className="text-green-700">Хватает на складе</span>
+                  ) : ['planned', 'in_progress'].includes(j.status) ? (
                     <span className="text-green-700">Всё в резерве</span>
                   ) : (
                     <span className="text-stone-400">—</span>

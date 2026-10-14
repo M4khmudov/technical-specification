@@ -76,9 +76,17 @@ const LIGHT = {
   red: { color: 'bg-red-500', label: 'Ничего не зарезервировано' },
 }
 
-export function TrafficLight({ light }: { light: Light | null }) {
+// Черновик ничего не резервирует: его «светофор» — хватит ли свободного остатка
+const DRAFT_LIGHT = {
+  green: 'Хватает на складе',
+  yellow: 'На складе хватает части',
+  red: 'На складе нет',
+}
+
+export function TrafficLight({ light, draft = false }: { light: Light | null; draft?: boolean }) {
   if (!light) return <span className="text-stone-400">—</span>
-  const { color, label } = LIGHT[light]
+  const { color } = LIGHT[light]
+  const label = draft ? DRAFT_LIGHT[light] : LIGHT[light].label
   return (
     <span className="inline-flex items-center gap-2 whitespace-nowrap">
       <span className={`inline-block h-3 w-3 rounded-full ${color}`} aria-hidden />
