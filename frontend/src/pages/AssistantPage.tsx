@@ -9,7 +9,7 @@ import { streamAnswer } from '../chatStream'
 import ActionCard from '../components/ActionCard'
 import { useConfirm } from '../useConfirm'
 import MemoryPanel from '../components/MemoryPanel'
-import { downloadChatFile, imagesInText, isChatFileUrl } from '../chatFiles'
+import { downloadChatFile, imagesInText, isChatFileUrl, uploadErrorText, uploadProblem } from '../chatFiles'
 import type { ChatFileData, CodeRun } from '../chatFiles'
 import { AuthImage, CodeRuns, FileChip, GeneratedFiles } from '../components/ChatFiles'
 import { PaperclipIcon } from '../components/Icons'
@@ -287,6 +287,12 @@ export default function AssistantPage() {
   // Файл загружается сразу и прикрепляется к следующему вопросу
   const attach = async (file: File) => {
     setError(null)
+    const problem = uploadProblem(file)
+    if (problem) {
+      setError(problem)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
     setUploading(true)
     try {
       let cid = conversationId
@@ -303,8 +309,8 @@ export default function AssistantPage() {
         headers: { Authorization: `Bearer ${getToken() ?? ''}` },
         body: form,
       })
-      const body = await response.json()
-      if (!response.ok) throw new ApiError(response.status, body.detail ?? 'Не удалось загрузить файл')
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new ApiError(response.status, uploadErrorText(response.status, body))
       setAttachments((prev) => [...prev, body as ChatFileData])
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Не удалось загрузить файл')

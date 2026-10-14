@@ -47,3 +47,20 @@ function isImageEmbed(content: string, url: string): boolean {
   }
   return false
 }
+
+// Те же правила, что на бэкенде: CSV или XLSX до 5 МБ. Проверяем до отправки, чтобы не
+// гонять большой файл по сети ради отказа
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+export function uploadProblem(file: { name: string; size: number }): string | null {
+  if (!/\.(csv|xlsx)$/i.test(file.name)) return 'Можно загрузить только таблицу CSV или Excel (.xlsx)'
+  if (file.size === 0) return 'Файл пустой'
+  if (file.size > MAX_UPLOAD_BYTES) return 'Файл больше 5 МБ'
+  return null
+}
+
+export function uploadErrorText(status: number, body: { detail?: unknown }): string {
+  if (typeof body.detail === 'string') return body.detail
+  if (status === 413) return 'Файл больше 5 МБ'
+  return 'Не удалось загрузить файл'
+}
