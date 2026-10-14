@@ -123,7 +123,10 @@ def memory_problem(fact: str, quote: str, user_text: str, data_seen: list[str]) 
 
 
 _MONTHS = "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря"
-_DATE_WORDS = re.compile(rf"\b\d{{1,2}}\s+(?:{_MONTHS})\b", re.IGNORECASE)
+# «12 августа», «с 14 по 21 октября», «14–21 октября»
+_DATE_WORDS = re.compile(
+    rf"\b\d{{1,2}}(?:\s*(?:по|до|и|–|—|-|,)\s*\d{{1,2}})*\s+(?:{_MONTHS})\b", re.IGNORECASE
+)
 
 
 _LINKS = re.compile(r"\]\([^)\s]*\)|https?://\S+|/api/\S+")
