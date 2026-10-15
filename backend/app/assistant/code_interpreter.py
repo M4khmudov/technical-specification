@@ -212,6 +212,20 @@ def _map_xlsx(data: bytes, transform) -> bytes:
     return buffer.getvalue()
 
 
+def container_name(filename: str) -> str:
+    """Имя файла для контейнера — латиницей. OpenAI выбрасывает из имени кириллицу:
+    «закупки_сентябрь.csv» оказывается в контейнере как «<id>-.csv», и путь, который мы
+    называли модели, не существовал (найдено прогоном на запасной модели)."""
+    from app.assistant.pii import TRANSLIT
+
+    path = PurePosixPath(filename)
+    stem = "".join(
+        TRANSLIT[ch.lower()].split("|")[0] if ch.lower() in TRANSLIT else ch for ch in path.stem
+    )
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_") or "file"
+    return f"{stem}{path.suffix.lower()}"
+
+
 @dataclass
 class CodeInterpreterSession:
     """Файлы одного хода диалога у провайдера."""
@@ -237,7 +251,8 @@ class CodeInterpreterSession:
         """Положить файл в контейнер (с псевдонимами). Возвращает путь внутри контейнера."""
         if self.store is None:
             raise DomainError("Code Interpreter недоступен")
-        safe_name = self.pii.mask(filename) if self.pii else filename
+        masked = self.pii.mask(filename) if self.pii else filename
+        safe_name = container_name(masked)
         file_id = await self.store.upload_file(safe_name, mask_file(filename, data, self.pii))
         self.file_ids.append(file_id)
         self.filenames.append(safe_name)

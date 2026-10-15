@@ -353,7 +353,7 @@ async def test_uploaded_excel_is_analysed_with_pseudonyms(api, provider, session
     request = provider.requests[0][1]
     assert request.items[-1].text.endswith(
         "[Файлы пользователя в Code Interpreter (путь — точно как указан):\n"
-        "- `/mnt/data/file-1-продажи.xlsx` — Excel]"
+        "- `/mnt/data/file-1-prodazhi.xlsx` — Excel]"
     )
     sent = load_workbook(io.BytesIO(provider.uploaded[request.code_interpreter.file_ids[0]][1]))
     values = [c.value for c in sent.active[2]]
@@ -428,3 +428,19 @@ def test_csv_delimiter_is_told_to_the_model(data, expected):
     from app.assistant.code_interpreter import describe_upload
 
     assert expected in describe_upload("закупки.csv", data)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("закупки_сентябрь.csv", "zakupki_sentyabr.csv"),
+        ("Отчёт Сотрудник-2 (1).XLSX", "otchet_sotrudnik-2_1.xlsx"),
+        ("sales.csv", "sales.csv"),
+        ("ёжик.csv", "ezhik.csv"),
+    ],
+)
+def test_container_file_names_are_latin(name, expected):
+    """OpenAI выбрасывает кириллицу из имени: путь, названный модели, должен существовать."""
+    from app.assistant.code_interpreter import container_name
+
+    assert container_name(name) == expected
