@@ -22,6 +22,9 @@ x-backend-env: &backend-env
 services:
   db:
     image: postgres:16-alpine
+    # В лог — только текст ошибки: без DETAIL («Failing row contains …» — значения строки,
+    # там бывают ФИО и названия поставщиков) и без текста запроса
+    command: ["postgres", "-c", "log_error_verbosity=terse", "-c", "log_min_error_statement=panic"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-candles}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-candles}

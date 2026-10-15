@@ -213,9 +213,11 @@ async def test_enqueue_does_not_hang_when_redis_is_down(monkeypatch):
     """S5: «Завершить» не ждёт недоступный Redis."""
     import time
 
-    settings = get_settings()
-    monkeypatch.setattr(settings, "marking_enqueue_enabled", True)
-    monkeypatch.setattr(settings, "redis_url", "redis://10.255.255.1:6379/0")  # не отвечает
+    async def redis_not_answering(report_id):
+        await asyncio.sleep(30)  # как Redis, который не отвечает (в сеть тест не ходит)
+
+    monkeypatch.setattr(get_settings(), "marking_enqueue_enabled", True)
+    monkeypatch.setattr(marking, "_enqueue", redis_not_answering)
     started = time.monotonic()
     await marking.enqueue(1)
     assert time.monotonic() - started < 2

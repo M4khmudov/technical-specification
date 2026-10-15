@@ -133,8 +133,7 @@ export function auditText(key: string, value: unknown): string {
   const text = String(value)
   if (key === 'status') return STATUS_TEXT[text] ?? text
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return fmtDate(text)
-  if (/^-?\d+(\.\d+)?(E[+-]?\d+)?$/i.test(text)) {
-    return Number(text).toLocaleString('ru-RU', { maximumFractionDigits: 6 })
-  }
+  // Числа — строкой, как везде в интерфейсе: без перевода во float
+  if (/^-?\d+(\.\d+)?$/.test(text)) return fmtQty(text)
   return text
 }
