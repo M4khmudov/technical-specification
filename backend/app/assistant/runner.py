@@ -174,11 +174,14 @@ async def _attach_uploads(session, turn: Turn, ci: CodeInterpreterSession, items
     for upload in reversed(uploads):
         try:
             path = await ci.add(upload.filename, upload.data)
-            paths.append(f"{path} ({describe_upload(upload.filename, upload.data)})")
+            # Путь — отдельно и в обратных кавычках: модель не должна приклеить к нему
+            # подсказку о формате
+            paths.append(f"- `{path}` — {describe_upload(upload.filename, upload.data)}")
         except (LLMError, DomainError) as exc:
             logger.warning("upload to code interpreter failed: %s", type(exc).__name__)
-            paths.append(f"{ci.pii.mask(upload.filename)} (не удалось передать)")
-    note = "\n\n[Файлы пользователя доступны в Code Interpreter: " + ", ".join(paths) + "]"
+            paths.append(f"- {ci.pii.mask(upload.filename)} — не удалось передать")
+    note = "\n\n[Файлы пользователя в Code Interpreter (путь — точно как указан):\n"
+    note += "\n".join(paths) + "]"
     last = items[-1]
     if isinstance(last, UserMessage):
         return [*items[:-1], UserMessage(last.text + note)]

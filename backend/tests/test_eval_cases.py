@@ -163,6 +163,11 @@ BAD = {
     "jobs_list": [o("Запланированных заданий нет", tools=[tool("list_jobs")])],
     "create_job": [
         o("Задание создано!", tools=[tool("create_job")], actions=[action(200, "Лаванда", FRIDAY)]),
+        o(
+            "Запланировано производство 200 свечей. Нажмите «Подтвердить».",
+            tools=[tool("create_job")],
+            actions=[action(200, "Лаванда", FRIDAY)],
+        ),
         o("Подготовил задание. Нажмите «Подтвердить».", actions=[action(200, "Лаванда", TODAY)]),
     ],
     "ci_chart": [o("Вот график", tools=[tool("export_data")])],
@@ -242,3 +247,24 @@ def test_offer_of_a_report_is_not_a_false_promise():
     """«Подготовлю отчёт» — не обещание действия; «подготовлю задание на отмену» — да."""
     assert c.no_action_claims(o("Сообщите детали — подготовлю соответствующий отчёт")).passed
     assert not c.no_action_claims(o("Скажите, и я подготовлю задание на отмену")).passed
+
+
+def test_future_tense_is_not_a_claim_that_the_job_exists():
+    """«Будет запланировано производство…» — правильная формулировка до подтверждения."""
+    from app.evals.cases import CASES as ALL
+
+    case = next(x for x in ALL if x.id == "create_job")
+    answer = o(
+        "Подготовил задание. Будет запланировано производство 200 свечей. Нажмите «Подтвердить».",
+        tools=[tool("create_job")],
+        actions=[action(200, "Лаванда", FRIDAY)],
+    )
+    assert all(r.passed for r in case.checks(answer, REFS["create_job"]))
+
+
+def test_no_data_wording_variants_pass():
+    from app.evals.cases import CASES as ALL
+
+    case = next(x for x in ALL if x.id == "no_data")
+    answer = o("Информации о продажах и выручке (клиентах, ценах продажи) в системе нет.")
+    assert all(r.passed for r in case.checks(answer, REFS["no_data"]))

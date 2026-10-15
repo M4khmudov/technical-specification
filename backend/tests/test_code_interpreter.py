@@ -352,7 +352,8 @@ async def test_uploaded_excel_is_analysed_with_pseudonyms(api, provider, session
 
     request = provider.requests[0][1]
     assert request.items[-1].text.endswith(
-        "[Файлы пользователя доступны в Code Interpreter: /mnt/data/file-1-продажи.xlsx (Excel)]"
+        "[Файлы пользователя в Code Interpreter (путь — точно как указан):\n"
+        "- `/mnt/data/file-1-продажи.xlsx` — Excel]"
     )
     sent = load_workbook(io.BytesIO(provider.uploaded[request.code_interpreter.file_ids[0]][1]))
     values = [c.value for c in sent.active[2]]
